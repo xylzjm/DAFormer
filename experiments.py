@@ -60,12 +60,8 @@ def get_backbone_cfg(backbone):
         if backbone == f'mitb{i}-del':
             return dict(_delete_=True, type=f'mit_b{i}')
     return {
-        'r50v1c': {
-            'depth': 50
-        },
-        'r101v1c': {
-            'depth': 101
-        },
+        'r50v1c': {'depth': 50},
+        'r101v1c': {'depth': 101},
         'x50-32': {
             'type': 'ResNeXt',
             'depth': 50,
@@ -84,7 +80,7 @@ def get_backbone_cfg(backbone):
             'stem_channels': 64,
             'radix': 2,
             'reduction_factor': 4,
-            'avg_down_stride': True
+            'avg_down_stride': True,
         },
         's101': {
             'type': 'ResNeSt',
@@ -92,7 +88,7 @@ def get_backbone_cfg(backbone):
             'stem_channels': 128,
             'radix': 2,
             'reduction_factor': 4,
-            'avg_down_stride': True
+            'avg_down_stride': True,
         },
         's200': {
             'type': 'ResNeSt',
@@ -117,12 +113,12 @@ def update_decoder_in_channels(cfg, architecture, backbone):
 def setup_rcs(cfg, temperature):
     cfg.setdefault('data', {}).setdefault('train', {})
     cfg['data']['train']['rare_class_sampling'] = dict(
-        min_pixels=3000, class_temp=temperature, min_crop_ratio=0.5)
+        min_pixels=3000, class_temp=temperature, min_crop_ratio=0.5
+    )
     return cfg
 
 
 def generate_experiment_cfgs(id):
-
     def config_from_vars():
         cfg = {'_base_': ['_base_/default_runtime.py'], 'n_gpus': n_gpus}
         if seed is not None:
@@ -147,73 +143,84 @@ def generate_experiment_cfgs(id):
         if uda == 'target-only':
             cfg['_base_'].append(f'_base_/datasets/{target}_half_{crop}.py')
         elif uda == 'source-only':
-            cfg['_base_'].append(
-                f'_base_/datasets/{source}_to_{target}_{crop}.py')
+            cfg['_base_'].append(f'_base_/datasets/{source}_to_{target}_{crop}.py')
         else:
             cfg['_base_'].append(
-                f'_base_/datasets/uda_{source}_to_{target}_{crop}.py')
+                f'_base_/datasets/uda_{source}_to_{target}_{crop}.py'
+            )
             cfg['_base_'].append(f'_base_/uda/{uda}.py')
-        if 'dacs' in uda and plcrop:
+        if method_name in uda and plcrop:
             cfg.setdefault('uda', {})
             cfg['uda']['pseudo_weight_ignore_top'] = 15
             cfg['uda']['pseudo_weight_ignore_bottom'] = 120
         cfg['data'] = dict(
-            samples_per_gpu=batch_size,
-            workers_per_gpu=workers_per_gpu,
-            train={})
-        if 'dacs' in uda and rcs_T is not None:
+            samples_per_gpu=batch_size, workers_per_gpu=workers_per_gpu, train={}
+        )
+        if method_name in uda and rcs_T is not None:
             cfg = setup_rcs(cfg, rcs_T)
 
         # Setup optimizer and schedule
-        if 'dacs' in uda:
+        if method_name in uda:
             cfg['optimizer_config'] = None  # Don't use outer optimizer
 
         cfg['_base_'].extend(
-            [f'_base_/schedules/{opt}.py', f'_base_/schedules/{schedule}.py'])
+            [f'_base_/schedules/{opt}.py', f'_base_/schedules/{schedule}.py']
+        )
         cfg['optimizer'] = {'lr': lr}
         cfg['optimizer'].setdefault('paramwise_cfg', {})
         cfg['optimizer']['paramwise_cfg'].setdefault('custom_keys', {})
         opt_param_cfg = cfg['optimizer']['paramwise_cfg']['custom_keys']
         if pmult:
-            opt_param_cfg['head'] = dict(lr_mult=10.)
+            opt_param_cfg['head'] = dict(lr_mult=10.0)
         if 'mit' in backbone:
-            opt_param_cfg['pos_block'] = dict(decay_mult=0.)
-            opt_param_cfg['norm'] = dict(decay_mult=0.)
+            opt_param_cfg['pos_block'] = dict(decay_mult=0.0)
+            opt_param_cfg['norm'] = dict(decay_mult=0.0)
 
         # Setup runner
         cfg['runner'] = dict(type='IterBasedRunner', max_iters=iters)
         cfg['checkpoint_config'] = dict(
-            by_epoch=False, interval=iters, max_keep_ckpts=1)
+            by_epoch=False, interval=iters, max_keep_ckpts=1
+        )
         cfg['evaluation'] = dict(interval=iters // 10, metric='mIoU')
 
         # Construct config name
         uda_mod = uda
-        if 'dacs' in uda and rcs_T is not None:
+        if method_name in uda and rcs_T is not None:
             uda_mod += f'_rcs{rcs_T}'
-        if 'dacs' in uda and plcrop:
+        if method_name in uda and plcrop:
             uda_mod += '_cpl'
-        cfg['name'] = f'{source}2{target}_{uda_mod}_{architecture_mod}_' \
-                      f'{backbone}_{schedule}'
+        cfg['name'] = (
+            f'{source}2{target}_{uda_mod}_{architecture_mod}_'
+            f'{backbone}_{schedule}'
+        )
         cfg['exp'] = id
         cfg['name_dataset'] = f'{source}2{target}'
         cfg['name_architecture'] = f'{architecture_mod}_{backbone}'
         cfg['name_encoder'] = backbone
         cfg['name_decoder'] = architecture_mod
         cfg['name_uda'] = uda_mod
-        cfg['name_opt'] = f'{opt}_{lr}_pm{pmult}_{schedule}' \
-                          f'_{n_gpus}x{batch_size}_{iters // 1000}k'
+        cfg['name_opt'] = (
+            f'{opt}_{lr}_pm{pmult}_{schedule}'
+            f'_{n_gpus}x{batch_size}_{iters // 1000}k'
+        )
         if seed is not None:
             cfg['name'] += f'_s{seed}'
-        cfg['name'] = cfg['name'].replace('.', '').replace('True', 'T') \
-            .replace('False', 'F').replace('cityscapes', 'cs') \
-            .replace('synthia', 'syn') \
+        cfg['name'] = (
+            cfg['name']
+            .replace('.', '')
+            .replace('True', 'T')
+            .replace('False', 'F')
+            .replace('cityscapes', 'cs')
+            .replace('synthia', 'syn')
             .replace('darkzurich', 'dzur')
+        )
         return cfg
 
     # -------------------------------------------------------------------------
     # Set some defaults
     # -------------------------------------------------------------------------
     cfgs = []
+    method_name = 'dacs'
     n_gpus = 1
     batch_size = 2
     iters = 40000
@@ -253,8 +260,12 @@ def generate_experiment_cfgs(id):
             'dacs',
             'target-only',
         ]
-        for (source, target), (architecture, backbone), uda, seed in \
-                itertools.product(datasets, models, udas, seeds):
+        for (
+            (source, target),
+            (architecture, backbone),
+            uda,
+            seed,
+        ) in itertools.product(datasets, models, udas, seeds):
             cfg = config_from_vars()
             cfgs.append(cfg)
     # -------------------------------------------------------------------------
@@ -272,8 +283,12 @@ def generate_experiment_cfgs(id):
             'dacs',
             'target-only',
         ]
-        for (source, target), (architecture, backbone), uda, seed in \
-                itertools.product(datasets, models, udas, seeds):
+        for (
+            (source, target),
+            (architecture, backbone),
+            uda,
+            seed,
+        ) in itertools.product(datasets, models, udas, seeds):
             cfg = config_from_vars()
             cfgs.append(cfg)
     # -------------------------------------------------------------------------
@@ -296,8 +311,12 @@ def generate_experiment_cfgs(id):
             'dacs',
             'target-only',
         ]
-        for (source, target), (architecture, backbone), uda, seed in \
-                itertools.product(datasets, models, udas, seeds):
+        for (
+            (source, target),
+            (architecture, backbone),
+            uda,
+            seed,
+        ) in itertools.product(datasets, models, udas, seeds):
             cfg = config_from_vars()
             cfgs.append(cfg)
     # -------------------------------------------------------------------------
@@ -314,9 +333,13 @@ def generate_experiment_cfgs(id):
             ('adamw', 0.00006, 'poly10', True),
             # ('adamw', 0.00006, 'poly10warm', True),  # already run in exp 1
         ]
-        for (source, target), (architecture, backbone), \
-            (opt, lr, schedule, pmult), uda, seed in \
-                itertools.product(datasets, models, opts, udas, seeds):
+        for (
+            (source, target),
+            (architecture, backbone),
+            (opt, lr, schedule, pmult),
+            uda,
+            seed,
+        ) in itertools.product(datasets, models, opts, udas, seeds):
             cfg = config_from_vars()
             cfgs.append(cfg)
     # -------------------------------------------------------------------------
@@ -333,8 +356,7 @@ def generate_experiment_cfgs(id):
             ('segformer', 'mitb5', 'dacs_a999_fdthings', 0.01, True),
             ('dlv2red', 'r101v1c', 'dacs_a999_fdthings', 0.01, True),
         ]:
-            for (source, target), seed in \
-                    itertools.product(datasets, seeds):
+            for (source, target), seed in itertools.product(datasets, seeds):
                 cfg = config_from_vars()
                 cfgs.append(cfg)
     # -------------------------------------------------------------------------
@@ -358,8 +380,12 @@ def generate_experiment_cfgs(id):
             ('daformer_aspp', 'mitb5'),  # DAFormer w/o DSC
             ('daformer_sepaspp', 'mitb5'),  # DAFormer
         ]
-        for (source, target), (architecture, backbone), uda, seed in \
-                itertools.product(datasets, models, udas, seeds):
+        for (
+            (source, target),
+            (architecture, backbone),
+            uda,
+            seed,
+        ) in itertools.product(datasets, models, udas, seeds):
             cfg = config_from_vars()
             cfgs.append(cfg)
     # -------------------------------------------------------------------------
@@ -375,8 +401,7 @@ def generate_experiment_cfgs(id):
         uda = 'dacs_a999_fdthings'
         rcs_T = 0.01
         plcrop = True
-        for (source, target), seed in \
-                itertools.product(datasets, seeds):
+        for (source, target), seed in itertools.product(datasets, seeds):
             cfg = config_from_vars()
             cfgs.append(cfg)
     # -------------------------------------------------------------------------
@@ -392,8 +417,7 @@ def generate_experiment_cfgs(id):
         uda = 'dacs_a999_fdthings'
         rcs_T = 0.01
         plcrop = True
-        for (source, target), seed in \
-                itertools.product(datasets, seeds):
+        for (source, target), seed in itertools.product(datasets, seeds):
             cfg = config_from_vars()
             cfgs.append(cfg)
     # -------------------------------------------------------------------------
@@ -427,8 +451,12 @@ def generate_experiment_cfgs(id):
             ('upernet_ch256', 'mitb5'),
         ]
         udas = ['target-only']
-        for (source, target), (architecture, backbone), uda, seed in \
-                itertools.product(datasets, models, udas, seeds):
+        for (
+            (source, target),
+            (architecture, backbone),
+            uda,
+            seed,
+        ) in itertools.product(datasets, models, udas, seeds):
             cfg = config_from_vars()
             cfg['log_level'] = logging.ERROR
             cfg['evaluation']['interval'] = 100
@@ -450,12 +478,27 @@ def generate_experiment_cfgs(id):
             ('segformer', 'mitb5', 'dacs_fdthings', 0.01, False),
             ('segformer', 'mitb5', 'dacs_a999_fdthings', 0.01, True),
         ]:
-            for (source, target), seed in \
-                    itertools.product(datasets, seeds):
+            for (source, target), seed in itertools.product(datasets, seeds):
                 cfg = config_from_vars()
                 cfg['log_level'] = logging.ERROR
                 cfg['evaluation']['interval'] = 100
                 cfgs.append(cfg)
+    # -------------------------------------------------------------------------
+    # VECR Training Test
+    # -------------------------------------------------------------------------
+    elif id == 301:
+        seeds = [0]
+        datasets = [
+            ('cityscapes', 'acdc'),
+        ]
+        architecture, backbone = ('daformer_sepaspp_logit_constraint', 'mitb5')
+        uda = 'vecr_a999'
+        rcs_T = 0.01
+        plcrop = False
+        for (source, target), seed in itertools.product(datasets, seeds):
+            method_name = 'vecr'
+            cfg = config_from_vars()
+            cfgs.append(cfg)
     else:
         raise NotImplementedError('Unknown id {}'.format(id))
 

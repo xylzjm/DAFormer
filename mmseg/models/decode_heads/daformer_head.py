@@ -17,17 +17,18 @@ from .sep_aspp_head import DepthwiseSeparableASPPModule
 
 
 class ASPPWrapper(nn.Module):
-
-    def __init__(self,
-                 in_channels,
-                 channels,
-                 sep,
-                 dilations,
-                 pool,
-                 norm_cfg,
-                 act_cfg,
-                 align_corners,
-                 context_cfg=None):
+    def __init__(
+        self,
+        in_channels,
+        channels,
+        sep,
+        dilations,
+        pool,
+        norm_cfg,
+        act_cfg,
+        align_corners,
+        context_cfg=None,
+    ):
         super(ASPPWrapper, self).__init__()
         assert isinstance(dilations, (list, tuple))
         self.dilations = dilations
@@ -36,16 +37,13 @@ class ASPPWrapper(nn.Module):
             self.image_pool = nn.Sequential(
                 nn.AdaptiveAvgPool2d(1),
                 ConvModule(
-                    in_channels,
-                    channels,
-                    1,
-                    norm_cfg=norm_cfg,
-                    act_cfg=act_cfg))
+                    in_channels, channels, 1, norm_cfg=norm_cfg, act_cfg=act_cfg
+                ),
+            )
         else:
             self.image_pool = None
         if context_cfg is not None:
-            self.context_layer = build_layer(in_channels, channels,
-                                             **context_cfg)
+            self.context_layer = build_layer(in_channels, channels, **context_cfg)
         else:
             self.context_layer = None
         ASPP = {True: DepthwiseSeparableASPPModule, False: ASPPModule}[sep]
@@ -55,14 +53,16 @@ class ASPPWrapper(nn.Module):
             channels=channels,
             norm_cfg=norm_cfg,
             conv_cfg=None,
-            act_cfg=act_cfg)
+            act_cfg=act_cfg,
+        )
         self.bottleneck = ConvModule(
             (len(dilations) + int(pool) + int(bool(context_cfg))) * channels,
             channels,
             kernel_size=3,
             padding=1,
             norm_cfg=norm_cfg,
-            act_cfg=act_cfg)
+            act_cfg=act_cfg,
+        )
 
     def forward(self, x):
         """Forward function."""
@@ -73,7 +73,9 @@ class ASPPWrapper(nn.Module):
                     self.image_pool(x),
                     size=x.size()[2:],
                     mode='bilinear',
-                    align_corners=self.align_corners))
+                    align_corners=self.align_corners,
+                )
+            )
         if self.context_layer is not None:
             aspp_outs.append(self.context_layer(x))
         aspp_outs.extend(self.aspp_modules(x))
@@ -93,16 +95,17 @@ def build_layer(in_channels, out_channels, type, **kwargs):
             in_channels=in_channels,
             out_channels=out_channels,
             padding=kwargs['kernel_size'] // 2,
-            **kwargs)
+            **kwargs
+        )
     elif type == 'conv':
         return ConvModule(
             in_channels=in_channels,
             out_channels=out_channels,
             padding=kwargs['kernel_size'] // 2,
-            **kwargs)
+            **kwargs
+        )
     elif type == 'aspp':
-        return ASPPWrapper(
-            in_channels=in_channels, channels=out_channels, **kwargs)
+        return ASPPWrapper(in_channels=in_channels, channels=out_channels, **kwargs)
     elif type == 'rawconv_and_aspp':
         kernel_size = kwargs.pop('kernel_size')
         return nn.Sequential(
@@ -110,22 +113,22 @@ def build_layer(in_channels, out_channels, type, **kwargs):
                 in_channels=in_channels,
                 out_channels=out_channels,
                 kernel_size=kernel_size,
-                padding=kernel_size // 2),
-            ASPPWrapper(
-                in_channels=out_channels, channels=out_channels, **kwargs))
+                padding=kernel_size // 2,
+            ),
+            ASPPWrapper(in_channels=out_channels, channels=out_channels, **kwargs),
+        )
     elif type == 'isa':
-        return ISALayer(
-            in_channels=in_channels, channels=out_channels, **kwargs)
+        return ISALayer(in_channels=in_channels, channels=out_channels, **kwargs)
     else:
         raise NotImplementedError(type)
 
 
 @HEADS.register_module()
 class DAFormerHead(BaseDecodeHead):
-
     def __init__(self, **kwargs):
         super(DAFormerHead, self).__init__(
-            input_transform='multiple_select', **kwargs)
+            input_transform='multiple_select', **kwargs
+        )
 
         assert not self.align_corners
         decoder_params = kwargs['decoder_params']
@@ -142,20 +145,22 @@ class DAFormerHead(BaseDecodeHead):
                 cfg['align_corners'] = self.align_corners
 
         self.embed_layers = {}
-        for i, in_channels, embed_dim in zip(self.in_index, self.in_channels,
-                                             embed_dims):
+        for i, in_channels, embed_dim in zip(
+            self.in_index, self.in_channels, embed_dims
+        ):
             if i == self.in_index[-1]:
                 self.embed_layers[str(i)] = build_layer(
-                    in_channels, embed_dim, **embed_neck_cfg)
+                    in_channels, embed_dim, **embed_neck_cfg
+                )
             else:
                 self.embed_layers[str(i)] = build_layer(
-                    in_channels, embed_dim, **embed_cfg)
+                    in_channels, embed_dim, **embed_cfg
+                )
         self.embed_layers = nn.ModuleDict(self.embed_layers)
 
-        self.fuse_layer = build_layer(
-            sum(embed_dims), self.channels, **fusion_cfg)
+        self.fuse_layer = build_layer(sum(embed_dims), self.channels, **fusion_cfg)
 
-    def forward(self, inputs):
+    def fusion_bottle_feat(self, inputs):
         x = inputs
         n, _, h, w = x[-1].shape
         # for f in x:
@@ -167,8 +172,12 @@ class DAFormerHead(BaseDecodeHead):
             # mmcv.print_log(f'{i}: {x[i].shape}', 'mmseg')
             _c[i] = self.embed_layers[str(i)](x[i])
             if _c[i].dim() == 3:
-                _c[i] = _c[i].permute(0, 2, 1).contiguous()\
+                _c[i] = (
+                    _c[i]
+                    .permute(0, 2, 1)
+                    .contiguous()
                     .reshape(n, -1, x[i].shape[2], x[i].shape[3])
+                )
             # mmcv.print_log(f'_c{i}: {_c[i].shape}', 'mmseg')
             if _c[i].size()[2:] != os_size:
                 # mmcv.print_log(f'resize {i}', 'mmseg')
@@ -176,9 +185,17 @@ class DAFormerHead(BaseDecodeHead):
                     _c[i],
                     size=os_size,
                     mode='bilinear',
-                    align_corners=self.align_corners)
+                    align_corners=self.align_corners,
+                )
+        return self.fuse_layer(torch.cat(list(_c.values()), dim=1))
 
-        x = self.fuse_layer(torch.cat(list(_c.values()), dim=1))
-        x = self.cls_seg(x)
+    def forward(self, inputs, return_decfeat=False):
+        x = self.fusion_bottle_feat(inputs)
 
-        return x
+        if return_decfeat:
+            out = {}
+            out['feat'] = x
+            out['out'] = self.cls_seg(x)
+            return out
+        else:
+            return self.cls_seg(x)
