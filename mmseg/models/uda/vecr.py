@@ -165,33 +165,37 @@ class VECR(UDADecorator):
                 data=torch.stack((tgt_ib_img[i], img[i])),
                 mean=means[0].unsqueeze(0),
                 std=stds[0].unsqueeze(0),
+                lam=self.fourier_lam,
             )
             src_fr_img[i] = fourier_transform(
-                data=torch.stack((img[i], tgt_ib_img[i])),
+                data=torch.stack((img[i], target_img[i])),
                 mean=means[0].unsqueeze(0),
                 std=stds[0].unsqueeze(0),
+                lam=self.fourier_lam,
             )
         tgt_fr_img, src_fr_img = torch.cat(tgt_fr_img), torch.cat(src_fr_img)
+        del tgt_ib_img
 
         # train student with source
         src_losses = self.get_model().forward_train(
             img, img_metas, gt_semantic_seg, return_feat=False
         )
+        src_losses = add_prefix(src_losses, 'src')
         src_loss, src_log = self._parse_losses(src_losses)
-        log_vars.update(add_prefix(src_log, 'src'))
+        log_vars.update(src_log)
         src_loss.backward()
 
         # generate pseudo-label
         with torch.no_grad():
             ema_tgt_logits = self.get_ema_model().encode_decode(
-                tgt_ib_img, target_img_metas
+                tgt_fr_img, target_img_metas
             )
             ema_tgt_softmax = torch.softmax(ema_tgt_logits, dim=1)
             pseudo_prob, pseudo_lbl = torch.max(ema_tgt_softmax, dim=1)
             # estimate pseudo-weight
             pseudo_msk = pseudo_prob.ge(self.pseudo_threshold).long() == 1
-            pseudo_size = np.size(np.array(pseudo_msk.cpu()))
-            pseudo_weight = torch.sum(pseudo_msk.item()) / pseudo_size
+            pseudo_size = np.size(np.array(pseudo_lbl.cpu()))
+            pseudo_weight = torch.sum(pseudo_msk).item() / pseudo_size
             pseudo_weight = pseudo_weight * torch.ones(pseudo_lbl.shape, device=dev)
             # get gt pixel-weight
             gt_pixel_weight = torch.ones(pseudo_weight.shape, device=dev)
@@ -206,10 +210,12 @@ class VECR(UDADecorator):
         for i in range(batch_size):
             strong_parameters['mix'] = mix_msks[i]
             mixed_img[i], mixed_lbl[i] = strong_transform(
+                strong_parameters,
                 data=torch.stack((img[i], target_img[i])),
                 target=torch.stack((gt_semantic_seg[i][0], pseudo_lbl[i])),
             )
             mixed_fr_img[i], pseudo_weight[i] = strong_transform(
+                strong_parameters,
                 data=torch.stack((img[i], tgt_fr_img[i])),
                 target=torch.stack((gt_pixel_weight[i], pseudo_weight[i])),
             )
@@ -218,19 +224,21 @@ class VECR(UDADecorator):
             torch.cat(mixed_fr_img),
             torch.cat(mixed_lbl),
         )
+
         # train student with target
         mixed_losses = self.get_model().forward_train(
             mixed_img, img_metas, mixed_lbl, pseudo_weight, return_feat=False
         )
+        mixed_losses = add_prefix(mixed_losses, 'mix')
         mixed_loss, mixed_log = self._parse_losses(mixed_losses)
-        log_vars.update(add_prefix(mixed_log, 'mix'))
+        log_vars.update(mixed_log)
         mixed_loss.backward()
-        # train student with Fourier target
         mixed_fr_losses = self.get_model().forward_train(
             mixed_fr_img, img_metas, mixed_lbl, pseudo_weight, return_feat=False
         )
+        mixed_fr_losses = add_prefix(mixed_fr_losses, 'frmix')
         mixed_fr_loss, mixed_fr_log = self._parse_losses(mixed_fr_losses)
-        log_vars.update(add_prefix(mixed_fr_log, 'frmix'))
+        log_vars.update(mixed_fr_log)
         mixed_fr_loss.backward()
 
         if self.local_iter % self.debug_img_interval == 0:
@@ -242,6 +250,7 @@ class VECR(UDADecorator):
             # vis_fr_img = torch.clamp(denorm(src_fr_img, means, stds), 0, 1)
             vis_tgtfr_img = torch.clamp(denorm(tgt_fr_img, means, stds), 0, 1)
             vis_mixfr_img = torch.clamp(denorm(mixed_fr_img, means, stds), 0, 1)
+            # vis_ib_img = torch.clamp(denorm(tgt_ib_img, means, stds), 0, 1)
             for j in range(batch_size):
                 rows, cols = 3, 4
                 fig, axs = plt.subplots(
@@ -257,8 +266,16 @@ class VECR(UDADecorator):
                         'left': 0,
                     },
                 )
-                subplotimg(axs[0][0], vis_img[j], 'Source Image')
-                subplotimg(axs[1][0], vis_tgt_img[j], 'Target Image')
+                subplotimg(
+                    axs[0][0],
+                    vis_img[j],
+                    f'{os.path.basename(img_metas[j]["filename"])}',
+                )
+                subplotimg(
+                    axs[1][0],
+                    vis_tgt_img[j],
+                    f'{os.path.basename(target_img_metas[j]["filename"])}',
+                )
                 subplotimg(
                     axs[0][1], gt_semantic_seg[j], 'Source Seg GT', cmap='cityscapes'
                 )
@@ -274,9 +291,10 @@ class VECR(UDADecorator):
                 )
                 subplotimg(axs[0][3], mix_msks[j][0], 'Domain Mask', cmap='gray')
                 subplotimg(axs[1][3], pseudo_weight[j], 'Pseudo W.', vmin=0, vmax=1)
-                # subplotimg(axs[3][0], vis_fr_img[j], 'Source FR Image')
-                subplotimg(axs[3][1], vis_tgtfr_img[j], 'Target FR Image')
-                subplotimg(axs[3][2], vis_mixfr_img[j], 'Mixed FR Image')
+                # subplotimg(axs[2][0], vis_fr_img[j], 'Source FR Image')
+                subplotimg(axs[2][1], vis_tgtfr_img[j], 'Target FR Image')
+                subplotimg(axs[2][2], vis_mixfr_img[j], 'Mixed FR Image')
+                # subplotimg(axs[2][3], vis_ib_img[j], 'Target IB')
                 for ax in axs.flat:
                     ax.axis('off')
                 plt.savefig(

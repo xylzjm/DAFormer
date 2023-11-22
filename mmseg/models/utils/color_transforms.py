@@ -53,10 +53,12 @@ def process(im, defog_A, IcA, mode='hsv-s-w4'):
     tx = 1 - param * IcA
 
     # tx_1 = torch.tile(tx, [1, 1, 1, 3])
-    tx_1 = np.tile(tx.numpy(), [1, 1, 1, 3])
-    tx_1 = torch.tensor(tx_1)
+    dev = tx.device
+    tx = tx.cpu()
+    tx_1 = np.tile(tx.numpy(), (1, 1, 1, 3))
+    tx_1 = torch.tensor(tx_1).cuda()
     return (im - defog_A[:, None, None, :]) / torch.maximum(
-        tx_1, torch.tensor(0.01)
+        tx_1, torch.tensor(0.01, device=dev)
     ) + defog_A[:, None, None, :]
 
 

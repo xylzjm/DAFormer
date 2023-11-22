@@ -181,7 +181,7 @@ def generate_experiment_cfgs(id):
         cfg['checkpoint_config'] = dict(
             by_epoch=False, interval=iters, max_keep_ckpts=1
         )
-        cfg['evaluation'] = dict(interval=iters // 10, metric='mIoU')
+        cfg['evaluation'] = dict(interval=iters // 40, metric='mIoU')
 
         # Construct config name
         uda_mod = uda
@@ -493,6 +493,24 @@ def generate_experiment_cfgs(id):
         ]
         architecture, backbone = ('daformer_sepaspp_logit_constraint', 'mitb5')
         uda = 'vecr_a999'
+        crop = '640x640'
+        rcs_T = 0.01
+        plcrop = False
+        for (source, target), seed in itertools.product(datasets, seeds):
+            method_name = 'vecr'
+            cfg = config_from_vars()
+            cfgs.append(cfg)
+    # -------------------------------------------------------------------------
+    # Prog_VECR Training Test
+    # -------------------------------------------------------------------------
+    elif id == 302:
+        seeds = [0]
+        datasets = [
+            ('cityscapes', 'acdc'),
+        ]
+        architecture, backbone = ('daformer_sepaspp_logit_constraint', 'mitb5')
+        uda = 'prog_vecr_src_CEori+for_tgt_CEori+for_a999'
+        crop = '640x640'
         rcs_T = 0.01
         plcrop = False
         for (source, target), seed in itertools.product(datasets, seeds):

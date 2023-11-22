@@ -39,11 +39,11 @@ class Prog_VECR(VECR):
 
         assert cfg['invariant'].get('source', None)
         assert cfg['invariant'].get('target', None)
+        self.inv_cfg = cfg['invariant']
         assert isinstance(self.inv_cfg['source']['ce'], (list, tuple))
         assert isinstance(self.inv_cfg['target']['ce'], (list, tuple))
-        self.inv_cfg = cfg['invariant']
-        self.src_invlam = self.inv_cfg['inv_loss']['weight']
-        self.tgt_invlam = self.inv_cfg['inv_loss']['weight']
+        self.src_invlam = self.inv_cfg['inv_loss']['src_weight']
+        self.tgt_invlam = self.inv_cfg['inv_loss']['tgt_weight']
         mmcv.print_log(
             f'src_invlam: {self.src_invlam}, tgt_invlam: {self.tgt_invlam}', 'mmcv'
         )
@@ -119,13 +119,16 @@ class Prog_VECR(VECR):
                 data=torch.stack((tgt_ib_img[i], img[i])),
                 mean=means[0].unsqueeze(0),
                 std=stds[0].unsqueeze(0),
+                lam=self.fourier_lam,
             )
             src_fr_img[i] = fourier_transform(
-                data=torch.stack((img[i], tgt_ib_img[i])),
+                data=torch.stack((img[i], target_img[i])),
                 mean=means[0].unsqueeze(0),
                 std=stds[0].unsqueeze(0),
+                lam=self.fourier_lam,
             )
         tgt_fr_img, src_fr_img = torch.cat(tgt_fr_img), torch.cat(src_fr_img)
+        del tgt_ib_img
 
         # train student with source
         src_invflag = self.inv_cfg['source']['consist'] is not None
@@ -139,8 +142,9 @@ class Prog_VECR(VECR):
                 if src_invflag and src_args in self.inv_cfg['source']['consist']:
                     src_featpool[src_args] = src_losses.pop('dec_feat')
                 assert 'dec_feat' not in src_losses
+                src_losses = add_prefix(src_losses, 'src_ori')
                 src_loss, src_log = self._parse_losses(src_losses)
-                log_vars.update(add_prefix(src_log, 'src_ori'))
+                log_vars.update(src_log)
                 src_loss.backward()
             elif src_args == 'fourier':
                 src_losses = self.get_model().forward_train(
@@ -152,8 +156,9 @@ class Prog_VECR(VECR):
                 if src_invflag and src_args in self.inv_cfg['source']['consist']:
                     src_featpool[src_args] = src_losses.pop('dec_feat')
                 assert 'dec_feat' not in src_losses
+                src_losses = add_prefix(src_losses, 'src_for')
                 src_loss, src_log = self._parse_losses(src_losses)
-                log_vars.update(add_prefix(src_log, 'src_for'))
+                log_vars.update(src_log)
                 src_loss.backward()
             else:
                 raise ValueError(f'{src_args} not allowed in source CE arguments')
@@ -180,18 +185,19 @@ class Prog_VECR(VECR):
             )
             log_vars.update(add_prefix(src_invlog, 'src'))
             src_invloss.backward()
+            del src_featpool
 
         # generate pseudo-label
         with torch.no_grad():
             ema_tgt_logits = self.get_ema_model().encode_decode(
-                tgt_ib_img, target_img_metas
+                tgt_fr_img, target_img_metas
             )
             ema_tgt_softmax = torch.softmax(ema_tgt_logits, dim=1)
             pseudo_prob, pseudo_lbl = torch.max(ema_tgt_softmax, dim=1)
             # estimate pseudo-weight
             pseudo_msk = pseudo_prob.ge(self.pseudo_threshold).long() == 1
-            pseudo_size = np.size(np.array(pseudo_msk.cpu()))
-            pseudo_weight = torch.sum(pseudo_msk.item()) / pseudo_size
+            pseudo_size = np.size(np.array(pseudo_lbl.cpu()))
+            pseudo_weight = torch.sum(pseudo_msk).item() / pseudo_size
             pseudo_weight = pseudo_weight * torch.ones(pseudo_lbl.shape, device=dev)
             # get gt pixel-weight
             gt_pixel_weight = torch.ones(pseudo_weight.shape, device=dev)
@@ -208,11 +214,13 @@ class Prog_VECR(VECR):
         for i in range(batch_size):
             strong_parameters['mix'] = mix_msks[i]
             mixed_img[i], mixed_lbl[i] = strong_transform(
+                strong_parameters,
                 data=torch.stack((img[i], target_img[i])),
                 target=torch.stack((gt_semantic_seg[i][0], pseudo_lbl[i])),
             )
             mixed_fr_img[i], pseudo_weight[i] = strong_transform(
-                data=torch.stack((img[i], tgt_fr_img[i])),
+                strong_parameters,
+                data=torch.stack((src_fr_img[i], tgt_fr_img[i])),
                 target=torch.stack((gt_pixel_weight[i], pseudo_weight[i])),
             )
         mixed_img, mixed_fr_img, mixed_lbl = (
@@ -269,8 +277,9 @@ class Prog_VECR(VECR):
                 if tgt_invflag and tgt_args in self.inv_cfg['target']['consist']:
                     tgt_featpool[tgt_args] = mix_losses.pop('dec_feat')
                 assert 'dec_feat' not in mix_losses
+                mix_losses = add_prefix(mix_losses, 'mix_ori')
                 mix_loss, mix_log = self._parse_losses(mix_losses)
-                log_vars.update(add_prefix(mix_log, 'mix_ori'))
+                log_vars.update(mix_log)
                 mix_loss.backward()
             elif tgt_args == ('fourier', 'fourier'):
                 mixfr_losses = self.get_model().forward_train(
@@ -283,8 +292,9 @@ class Prog_VECR(VECR):
                 if tgt_invflag and tgt_args in self.inv_cfg['target']['consist']:
                     tgt_featpool[tgt_args] = mixfr_losses.pop('dec_feat')
                 assert 'dec_feat' not in mixfr_losses
+                mixfr_losses = add_prefix(mixfr_losses, 'mix_for')
                 mixfr_loss, mixfr_log = self._parse_losses(mixfr_losses)
-                log_vars.update(add_prefix(mixfr_log, 'mix_for'))
+                log_vars.update(mixfr_log)
                 mixfr_loss.backward()
             else:
                 raise ValueError(f'{tgt_args} not allowed in target CE arguments')
@@ -310,12 +320,77 @@ class Prog_VECR(VECR):
                     raise ValueError(
                         f'{inv_args} not allowed in target Consist arguments'
                     )
-                assert len(tgt_featpool) == len(self.inv_cfg['target']['consist'])
-                tgt_invloss, tgt_invlog = self.feat_invariance_loss(
-                    tgt_featpool[self.inv_cfg['target']['consist'][0]],
-                    tgt_featpool[self.inv_cfg['target']['consist'][1]],
-                    proto=self.proto_estimator.Proto.detach(),
-                    label=tgt_semantic_seg,
+            assert len(tgt_featpool) == len(self.inv_cfg['target']['consist'])
+            tgt_invloss, tgt_invlog = self.feat_invariance_loss(
+                tgt_featpool[self.inv_cfg['target']['consist'][0]],
+                tgt_featpool[self.inv_cfg['target']['consist'][1]],
+                proto=self.proto_estimator.Proto.detach(),
+                label=tgt_semantic_seg,
+            )
+            log_vars.update(add_prefix(tgt_invlog, 'tgt'))
+            tgt_invloss.backward()
+            del tgt_featpool
+
+        if self.local_iter % self.debug_img_interval == 0:
+            out_dir = os.path.join(self.train_cfg['work_dir'], 'class_mix_debug')
+            os.makedirs(out_dir, exist_ok=True)
+            vis_img = torch.clamp(denorm(img, means, stds), 0, 1)
+            vis_tgt_img = torch.clamp(denorm(target_img, means, stds), 0, 1)
+            vis_mixed_img = torch.clamp(denorm(mixed_img, means, stds), 0, 1)
+            vis_fr_img = torch.clamp(denorm(src_fr_img, means, stds), 0, 1)
+            vis_tgtfr_img = torch.clamp(denorm(tgt_fr_img, means, stds), 0, 1)
+            vis_mixfr_img = torch.clamp(denorm(mixed_fr_img, means, stds), 0, 1)
+            # vis_ib_img = torch.clamp(denorm(tgt_ib_img, means, stds), 0, 1)
+            for j in range(batch_size):
+                rows, cols = 3, 4
+                fig, axs = plt.subplots(
+                    rows,
+                    cols,
+                    figsize=(3 * cols, 3 * rows),
+                    gridspec_kw={
+                        'hspace': 0.1,
+                        'wspace': 0,
+                        'top': 0.95,
+                        'bottom': 0,
+                        'right': 1,
+                        'left': 0,
+                    },
                 )
-                log_vars.update(add_prefix(tgt_invlog, 'tgt'))
-                tgt_invloss.backward()
+                subplotimg(
+                    axs[0][0],
+                    vis_img[j],
+                    f'{os.path.basename(img_metas[j]["filename"])}',
+                )
+                subplotimg(
+                    axs[1][0],
+                    vis_tgt_img[j],
+                    f'{os.path.basename(target_img_metas[j]["filename"])}',
+                )
+                subplotimg(
+                    axs[0][1], gt_semantic_seg[j], 'Source Seg GT', cmap='cityscapes'
+                )
+                subplotimg(
+                    axs[1][1],
+                    pseudo_lbl[j],
+                    'Target Seg Pseudo',
+                    cmap='cityscapes',
+                )
+                subplotimg(axs[0][2], vis_mixed_img[j], 'Mixed Image')
+                subplotimg(
+                    axs[1][2], mixed_lbl[j], 'Mixed Seg GT', cmap='cityscapes'
+                )
+                subplotimg(axs[0][3], mix_msks[j][0], 'Domain Mask', cmap='gray')
+                subplotimg(axs[1][3], pseudo_weight[j], 'Pseudo W.', vmin=0, vmax=1)
+                subplotimg(axs[2][0], vis_fr_img[j], 'Source FR Image')
+                subplotimg(axs[2][1], vis_tgtfr_img[j], 'Target FR Image')
+                subplotimg(axs[2][2], vis_mixfr_img[j], 'Mixed FR Image')
+                # subplotimg(axs[2][3], vis_ib_img[j], 'Target IB')
+                for ax in axs.flat:
+                    ax.axis('off')
+                plt.savefig(
+                    os.path.join(out_dir, f'{(self.local_iter):06d}_{j}.png')
+                )
+                plt.close()
+        self.local_iter += 1
+
+        return log_vars
