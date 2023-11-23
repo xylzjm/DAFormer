@@ -1,4 +1,4 @@
-_base_ = ['prog_vecr_a999.py']
+_base_ = ['prog_vecr_ret0.01_lam0.3.py']
 
 uda = dict(
     type='Prog_VECR',

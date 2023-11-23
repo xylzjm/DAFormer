@@ -35,6 +35,7 @@ class VECR(UDADecorator):
         self.color_jitter_s = cfg['color_jitter_strength']
         self.color_jitter_p = cfg['color_jitter_probability']
         # color transform
+        self.fourier_rat = cfg['fourier_ratio']
         self.fourier_lam = cfg['fourier_lambda']
 
         ema_cfg = deepcopy(cfg['model'])
@@ -159,21 +160,16 @@ class VECR(UDADecorator):
         tgt_ib_img = night_fog_filter(
             target_img, means, stds, night_map, mode='hsv-s-w4'
         )
-        tgt_fr_img, src_fr_img = [None] * batch_size, [None] * batch_size
+        tgt_fr_img = [None] * batch_size
         for i in range(batch_size):
             tgt_fr_img[i] = fourier_transform(
                 data=torch.stack((tgt_ib_img[i], img[i])),
                 mean=means[0].unsqueeze(0),
                 std=stds[0].unsqueeze(0),
+                ratio=self.fourier_rat,
                 lam=self.fourier_lam,
             )
-            src_fr_img[i] = fourier_transform(
-                data=torch.stack((img[i], target_img[i])),
-                mean=means[0].unsqueeze(0),
-                std=stds[0].unsqueeze(0),
-                lam=self.fourier_lam,
-            )
-        tgt_fr_img, src_fr_img = torch.cat(tgt_fr_img), torch.cat(src_fr_img)
+        tgt_fr_img = torch.cat(tgt_fr_img)
         del tgt_ib_img
 
         # train student with source
@@ -247,7 +243,6 @@ class VECR(UDADecorator):
             vis_img = torch.clamp(denorm(img, means, stds), 0, 1)
             vis_tgt_img = torch.clamp(denorm(target_img, means, stds), 0, 1)
             vis_mixed_img = torch.clamp(denorm(mixed_img, means, stds), 0, 1)
-            # vis_fr_img = torch.clamp(denorm(src_fr_img, means, stds), 0, 1)
             vis_tgtfr_img = torch.clamp(denorm(tgt_fr_img, means, stds), 0, 1)
             vis_mixfr_img = torch.clamp(denorm(mixed_fr_img, means, stds), 0, 1)
             # vis_ib_img = torch.clamp(denorm(tgt_ib_img, means, stds), 0, 1)
@@ -291,7 +286,6 @@ class VECR(UDADecorator):
                 )
                 subplotimg(axs[0][3], mix_msks[j][0], 'Domain Mask', cmap='gray')
                 subplotimg(axs[1][3], pseudo_weight[j], 'Pseudo W.', vmin=0, vmax=1)
-                # subplotimg(axs[2][0], vis_fr_img[j], 'Source FR Image')
                 subplotimg(axs[2][1], vis_tgtfr_img[j], 'Target FR Image')
                 subplotimg(axs[2][2], vis_mixfr_img[j], 'Mixed FR Image')
                 # subplotimg(axs[2][3], vis_ib_img[j], 'Target IB')

@@ -28,7 +28,7 @@ from torch.nn.modules.dropout import _DropoutNd
 @UDA.register_module()
 class Prog_VECR(VECR):
     def __init__(self, **cfg) -> None:
-        super(Prog_VECR).__init__(**cfg)
+        super(Prog_VECR, self).__init__(**cfg)
         self.ignore_index = 255
         self.proto_cfg = cfg['proto']
         self.proto_resume = cfg['proto_resume']
@@ -49,26 +49,27 @@ class Prog_VECR(VECR):
         )
 
     def feat_invariance_loss(self, f1, f2, proto, label):
-        assert f1.shape == f2.shape
-        b, a, h, w = f1.shape
-        feat = (f1 + f2).permute(0, 2, 3, 1).contiguous().view(b * h * w, a)
-        label = label.contiguous().view(
-            b * h * w,
-        )
+        pass
+        # assert f1.shape == f2.shape
+        # b, a, h, w = f1.shape
+        # feat = (f1 + f2).permute(0, 2, 3, 1).contiguous().view(b * h * w, a)
+        # label = label.contiguous().view(
+        #     b * h * w,
+        # )
 
-        mask = label != self.ignore_index
-        label = label[mask]
-        feat = feat[mask]
+        # mask = label != self.ignore_index
+        # label = label[mask]
+        # feat = feat[mask]
 
-        feat = F.normalize(feat, p=2, dim=1)
-        proto = F.normalize(proto, p=2, dim=1)
-        logits = feat @ proto.permute(1, 0).contiguous()
-        logits = logits / 50.0
+        # feat = F.normalize(feat, p=2, dim=1)
+        # proto = F.normalize(proto, p=2, dim=1)
+        # logits = feat @ proto.permute(1, 0).contiguous()
+        # logits = logits / 50.0
 
-        ce_criterion = nn.CrossEntropyLoss()
-        loss = ce_criterion(logits, label)
+        # ce_criterion = nn.CrossEntropyLoss()
+        # loss = ce_criterion(logits, label)
 
-        return loss
+        # return loss
 
     def forward_train(
         self, img, img_metas, gt_semantic_seg, target_img, target_img_metas
@@ -119,12 +120,14 @@ class Prog_VECR(VECR):
                 data=torch.stack((tgt_ib_img[i], img[i])),
                 mean=means[0].unsqueeze(0),
                 std=stds[0].unsqueeze(0),
+                ratio=self.fourier_rat,
                 lam=self.fourier_lam,
             )
             src_fr_img[i] = fourier_transform(
                 data=torch.stack((img[i], target_img[i])),
                 mean=means[0].unsqueeze(0),
                 std=stds[0].unsqueeze(0),
+                ratio=self.fourier_rat,
                 lam=self.fourier_lam,
             )
         tgt_fr_img, src_fr_img = torch.cat(tgt_fr_img), torch.cat(src_fr_img)
@@ -203,8 +206,9 @@ class Prog_VECR(VECR):
             gt_pixel_weight = torch.ones(pseudo_weight.shape, device=dev)
 
         # prepare target train data
-        tgt_semantic_seg = pseudo_lbl.clone().unsqueeze(1)
+        tgt_semantic_seg = pseudo_lbl.clone()
         tgt_semantic_seg[pseudo_weight == 0.0] = self.ignore_index
+        tgt_semantic_seg = tgt_semantic_seg.unsqueeze(1)
         mix_msks = get_class_masks(gt_semantic_seg)
         mixed_img, mixed_fr_img, mixed_lbl = (
             [None] * batch_size,
