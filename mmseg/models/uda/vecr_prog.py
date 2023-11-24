@@ -138,59 +138,6 @@ class VECR_ProG(VECR):
         tgt_fr_img, src_fr_img = torch.cat(tgt_fr_img), torch.cat(src_fr_img)
         del tgt_ib_img
 
-        # train student with source
-        src_invflag = self.inv_cfg['source']['consist'] is not None
-        src_featpool = {}
-        for src_args in self.inv_cfg['source']['ce']:
-            assert isinstance(src_args, str)
-            if src_args == 'original':
-                src_losses = self.get_model().forward_train(
-                    img, img_metas, gt_semantic_seg, return_decfeat=src_invflag
-                )
-                if src_invflag and src_args in self.inv_cfg['source']['consist']:
-                    src_featpool[src_args] = src_losses.pop('dec_feat')
-                assert 'dec_feat' not in src_losses
-                src_losses = add_prefix(src_losses, 'src_ori')
-                src_loss, src_log = self._parse_losses(src_losses)
-                log_vars.update(src_log)
-                src_loss.backward(retain_graph=src_invflag)
-            elif src_args == 'fourier':
-                src_losses = self.get_model().forward_train(
-                    src_fr_img,
-                    img_metas,
-                    gt_semantic_seg,
-                    return_decfeat=src_invflag,
-                )
-                if src_invflag and src_args in self.inv_cfg['source']['consist']:
-                    src_featpool[src_args] = src_losses.pop('dec_feat')
-                assert 'dec_feat' not in src_losses
-                src_losses = add_prefix(src_losses, 'src_for')
-                src_loss, src_log = self._parse_losses(src_losses)
-                log_vars.update(src_log)
-                src_loss.backward(retain_graph=src_invflag)
-            else:
-                raise ValueError(f'{src_args} not allowed in source CE arguments')
-        # source domain feature invariance loss
-        if src_invflag:
-            for inv_args in self.inv_cfg['source']['consist']:
-                assert isinstance(inv_args, str)
-                if inv_args == 'original' and inv_args not in src_featpool:
-                    src_featpool[inv_args] = self.get_model().extract_decfeat(img)
-                elif inv_args == 'fourier' and inv_args not in src_featpool:
-                    src_featpool[inv_args] = self.get_model().extract_decfeat(
-                        src_fr_img
-                    )
-            assert len(src_featpool) == len(self.inv_cfg['source']['consist'])
-            src_invloss, src_invlog = self.feat_invariance_loss(
-                src_featpool[self.inv_cfg['source']['consist'][0]],
-                src_featpool[self.inv_cfg['source']['consist'][1]],
-                proto=self.proto_estimator.Proto.detach(),
-                label=gt_semantic_seg,
-            )
-            log_vars.update(add_prefix(src_invlog, 'src'))
-            src_invloss.backward()
-            del src_featpool
-
         # generate pseudo-label
         with torch.no_grad():
             ema_tgt_logits = self.get_ema_model().encode_decode(
@@ -263,6 +210,59 @@ class VECR_ProG(VECR):
             self.proto_estimator.update(feat=src_emafeat, label=src_mask)
             self.proto_estimator.update(feat=tgt_emafeat, label=tgt_mask)
             del src_emafeat, tgt_emafeat
+
+        # train student with source
+        src_invflag = self.inv_cfg['source']['consist'] is not None
+        src_featpool = {}
+        for src_args in self.inv_cfg['source']['ce']:
+            assert isinstance(src_args, str)
+            if src_args == 'original':
+                src_losses = self.get_model().forward_train(
+                    img, img_metas, gt_semantic_seg, return_decfeat=src_invflag
+                )
+                if src_invflag and src_args in self.inv_cfg['source']['consist']:
+                    src_featpool[src_args] = src_losses.pop('dec_feat')
+                assert 'dec_feat' not in src_losses
+                src_losses = add_prefix(src_losses, 'src_ori')
+                src_loss, src_log = self._parse_losses(src_losses)
+                log_vars.update(src_log)
+                src_loss.backward(retain_graph=src_invflag)
+            elif src_args == 'fourier':
+                src_losses = self.get_model().forward_train(
+                    src_fr_img,
+                    img_metas,
+                    gt_semantic_seg,
+                    return_decfeat=src_invflag,
+                )
+                if src_invflag and src_args in self.inv_cfg['source']['consist']:
+                    src_featpool[src_args] = src_losses.pop('dec_feat')
+                assert 'dec_feat' not in src_losses
+                src_losses = add_prefix(src_losses, 'src_for')
+                src_loss, src_log = self._parse_losses(src_losses)
+                log_vars.update(src_log)
+                src_loss.backward(retain_graph=src_invflag)
+            else:
+                raise ValueError(f'{src_args} not allowed in source CE arguments')
+        # source domain feature invariance loss
+        if src_invflag:
+            for inv_args in self.inv_cfg['source']['consist']:
+                assert isinstance(inv_args, str)
+                if inv_args == 'original' and inv_args not in src_featpool:
+                    src_featpool[inv_args] = self.get_model().extract_decfeat(img)
+                elif inv_args == 'fourier' and inv_args not in src_featpool:
+                    src_featpool[inv_args] = self.get_model().extract_decfeat(
+                        src_fr_img
+                    )
+            assert len(src_featpool) == len(self.inv_cfg['source']['consist'])
+            src_invloss, src_invlog = self.feat_invariance_loss(
+                src_featpool[self.inv_cfg['source']['consist'][0]],
+                src_featpool[self.inv_cfg['source']['consist'][1]],
+                proto=self.proto_estimator.Proto.detach(),
+                label=gt_semantic_seg,
+            )
+            log_vars.update(add_prefix(src_invlog, 'src'))
+            src_invloss.backward()
+            del src_featpool
 
         # train student with target
         tgt_invflag = self.inv_cfg['target']['consist'] is not None
