@@ -514,8 +514,29 @@ def generate_experiment_cfgs(id):
         ]
         architecture, backbone = ('daformer_sepaspp_logit_constraint', 'mitb5')
         udas = [
-            'prog_vecr_ret0.001_lam1_src_CEori+for_tgt_CEori+for',
             # 'prog_vecr_ret0.01_lam0.3_src_CEori+for_tgt_CEori+for',
+            'prog_vecr_ret0.001_lam1_src_CEori+for_tgt_CEori+for',
+        ]
+        crop = '640x640'
+        rcs_T = 0.01
+        plcrop = False
+        for (source, target), uda, seed in itertools.product(datasets, udas, seeds):
+            method_name = 'vecr'
+            load_from = 'pretrained/source_warmup_daformer.pth'
+            cfg = config_from_vars()
+            cfgs.append(cfg)
+    # -------------------------------------------------------------------------
+    # Prog_VECR Inv Loss Training Test
+    # -------------------------------------------------------------------------
+    elif id == 303:
+        seeds = [0]
+        datasets = [
+            ('cityscapes', 'acdc'),
+        ]
+        architecture, backbone = ('daformer_sepaspp_logit_constraint', 'mitb5')
+        udas = [
+            # 'prog_vecr_ret0.001_lam1_src_CEori+for_tgt_CEori+for',
+            'prog_vecr_ret0.001_lam1_src_CEori_INVori+for_tgt_CEori_INVori+for',
         ]
         crop = '640x640'
         rcs_T = 0.01

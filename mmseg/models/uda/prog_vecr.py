@@ -49,27 +49,32 @@ class Prog_VECR(VECR):
         )
 
     def feat_invariance_loss(self, f1, f2, proto, label):
-        pass
-        # assert f1.shape == f2.shape
-        # b, a, h, w = f1.shape
-        # feat = (f1 + f2).permute(0, 2, 3, 1).contiguous().view(b * h * w, a)
-        # label = label.contiguous().view(
-        #     b * h * w,
-        # )
+        assert not torch.equal(f1, f2)
+        assert f1.shape == f2.shape
+        b, a, h, w = f1.shape
+        feat = (f1 + f2).permute(0, 2, 3, 1).contiguous().view(b * h * w, a)
+        label = (
+            resize(label.float(), size=(h, w), mode='nearest')
+            .long()
+            .contiguous()
+            .view(b * h * w, )
+        )
 
-        # mask = label != self.ignore_index
-        # label = label[mask]
-        # feat = feat[mask]
+        mask = (label != self.ignore_index)
+        label = label[mask]
+        feat = feat[mask]
 
-        # feat = F.normalize(feat, p=2, dim=1)
-        # proto = F.normalize(proto, p=2, dim=1)
-        # logits = feat @ proto.permute(1, 0).contiguous()
-        # logits = logits / 50.0
+        feat = F.normalize(feat, p=2, dim=1)
+        proto = F.normalize(proto, p=2, dim=1)
+        logits = feat @ proto.permute(1, 0).contiguous()
+        logits = logits / 50.0
 
-        # ce_criterion = nn.CrossEntropyLoss()
-        # loss = ce_criterion(logits, label)
+        ce_criterion = nn.CrossEntropyLoss()
+        loss = ce_criterion(logits, label)
+        inv_loss, inv_log = self._parse_losses({'loss_inv_feat': loss})
+        inv_log.pop('loss', None)
 
-        # return loss
+        return inv_loss, inv_log
 
     def forward_train(
         self, img, img_metas, gt_semantic_seg, target_img, target_img_metas
@@ -148,7 +153,7 @@ class Prog_VECR(VECR):
                 src_losses = add_prefix(src_losses, 'src_ori')
                 src_loss, src_log = self._parse_losses(src_losses)
                 log_vars.update(src_log)
-                src_loss.backward()
+                src_loss.backward(retain_graph=src_invflag)
             elif src_args == 'fourier':
                 src_losses = self.get_model().forward_train(
                     src_fr_img,
@@ -162,7 +167,7 @@ class Prog_VECR(VECR):
                 src_losses = add_prefix(src_losses, 'src_for')
                 src_loss, src_log = self._parse_losses(src_losses)
                 log_vars.update(src_log)
-                src_loss.backward()
+                src_loss.backward(retain_graph=src_invflag)
             else:
                 raise ValueError(f'{src_args} not allowed in source CE arguments')
         # source domain feature invariance loss
@@ -174,10 +179,6 @@ class Prog_VECR(VECR):
                 elif inv_args == 'fourier' and inv_args not in src_featpool:
                     src_featpool[inv_args] = self.get_model().extract_decfeat(
                         src_fr_img
-                    )
-                else:
-                    raise ValueError(
-                        f'{inv_args} not allowed in source Consist arguments'
                     )
             assert len(src_featpool) == len(self.inv_cfg['source']['consist'])
             src_invloss, src_invlog = self.feat_invariance_loss(
@@ -204,6 +205,7 @@ class Prog_VECR(VECR):
             pseudo_weight = pseudo_weight * torch.ones(pseudo_lbl.shape, device=dev)
             # get gt pixel-weight
             gt_pixel_weight = torch.ones(pseudo_weight.shape, device=dev)
+            del ema_tgt_logits, ema_tgt_softmax, pseudo_prob
 
         # prepare target train data
         tgt_semantic_seg = pseudo_lbl.clone()
@@ -250,20 +252,17 @@ class Prog_VECR(VECR):
                 resize(gt_semantic_seg.float(), size=(h, w), mode='nearest')
                 .long()
                 .contiguous()
-                .view(
-                    b * h * w,
-                )
+                .view(b * h * w, )
             )
             tgt_mask = (
                 resize(tgt_semantic_seg.float(), size=(h, w), mode='nearest')
                 .long()
                 .contiguous()
-                .view(
-                    b * h * w,
-                )
+                .view(b * h * w, )
             )
             self.proto_estimator.update(feat=src_emafeat, label=src_mask)
             self.proto_estimator.update(feat=tgt_emafeat, label=tgt_mask)
+            del src_emafeat, tgt_emafeat
 
         # train student with target
         tgt_invflag = self.inv_cfg['target']['consist'] is not None
@@ -276,7 +275,7 @@ class Prog_VECR(VECR):
                     img_metas,
                     mixed_lbl,
                     pseudo_weight,
-                    return_decfeat=src_invflag,
+                    return_decfeat=tgt_invflag,
                 )
                 if tgt_invflag and tgt_args in self.inv_cfg['target']['consist']:
                     tgt_featpool[tgt_args] = mix_losses.pop('dec_feat')
@@ -284,14 +283,14 @@ class Prog_VECR(VECR):
                 mix_losses = add_prefix(mix_losses, 'mix_ori')
                 mix_loss, mix_log = self._parse_losses(mix_losses)
                 log_vars.update(mix_log)
-                mix_loss.backward()
+                mix_loss.backward(retain_graph=tgt_invflag)
             elif tgt_args == ('fourier', 'fourier'):
                 mixfr_losses = self.get_model().forward_train(
                     mixed_fr_img,
                     img_metas,
                     mixed_lbl,
                     pseudo_weight,
-                    return_decfeat=src_invflag,
+                    return_decfeat=tgt_invflag,
                 )
                 if tgt_invflag and tgt_args in self.inv_cfg['target']['consist']:
                     tgt_featpool[tgt_args] = mixfr_losses.pop('dec_feat')
@@ -299,7 +298,7 @@ class Prog_VECR(VECR):
                 mixfr_losses = add_prefix(mixfr_losses, 'mix_for')
                 mixfr_loss, mixfr_log = self._parse_losses(mixfr_losses)
                 log_vars.update(mixfr_log)
-                mixfr_loss.backward()
+                mixfr_loss.backward(retain_graph=tgt_invflag)
             else:
                 raise ValueError(f'{tgt_args} not allowed in target CE arguments')
         # target domain feature invariance loss
@@ -319,10 +318,6 @@ class Prog_VECR(VECR):
                 ):
                     tgt_featpool[inv_args] = self.get_model().extract_decfeat(
                         mixed_fr_img
-                    )
-                else:
-                    raise ValueError(
-                        f'{inv_args} not allowed in target Consist arguments'
                     )
             assert len(tgt_featpool) == len(self.inv_cfg['target']['consist'])
             tgt_invloss, tgt_invlog = self.feat_invariance_loss(

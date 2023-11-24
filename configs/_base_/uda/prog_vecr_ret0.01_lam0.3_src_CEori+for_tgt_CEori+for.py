@@ -4,7 +4,7 @@ uda = dict(
     type='Prog_VECR',
     invariant=dict(
         source=dict(
-            ce=('original', 'fourier'),
+            ce=['original', 'fourier'],
             consist=None
         ),
         target=dict(

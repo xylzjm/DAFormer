@@ -6,8 +6,8 @@ uda = dict(
     fourier_lambda=1.,
     invariant=dict(
         source=dict(
-            ce=('original'),
-            consist=('original', 'fourier')
+            ce=['original'],
+            consist=['original', 'fourier']
         ),
         target=dict(
             ce=[('original', 'original')],
