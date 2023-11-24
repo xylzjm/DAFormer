@@ -26,9 +26,9 @@ from torch.nn.modules.dropout import _DropoutNd
 
 
 @UDA.register_module()
-class Prog_VECR(VECR):
+class VECR_ProG(VECR):
     def __init__(self, **cfg) -> None:
-        super(Prog_VECR, self).__init__(**cfg)
+        super(VECR_ProG, self).__init__(**cfg)
         self.ignore_index = 255
         self.proto_cfg = cfg['proto']
         self.proto_resume = cfg['proto_resume']

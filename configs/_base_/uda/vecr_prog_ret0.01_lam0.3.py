@@ -1,7 +1,7 @@
 _base_ = ['vecr_ret0.01_lam0.3.py']
 
 uda = dict(
-    type='Prog_VECR',
+    type='VECR_ProG',
     proto=dict(
         num_class=19,
         feat_dim=256,

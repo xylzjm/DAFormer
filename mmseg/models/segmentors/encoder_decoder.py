@@ -75,7 +75,7 @@ class EncoderDecoder(BaseSegmentor):
             x = self.neck(x)
         return self.decode_head.fusion_bottle_feat(x)
 
-    def encode_decode(self, img, img_metas):
+    def encode_decode(self, img, img_metas, return_decfeat=False):
         """Encode images with backbone and decode into a semantic segmentation
         map of the same size as input."""
         x = self.extract_feat(img)
@@ -85,7 +85,16 @@ class EncoderDecoder(BaseSegmentor):
             size=img.shape[2:],
             mode='bilinear',
             align_corners=self.align_corners)
-        return out
+        if return_decfeat:
+            f = self.extract_decfeat(img)
+            f = resize(
+                input=f,
+                size=img.shape[2:],
+                mode='bilinear',
+                align_corners=self.align_corners)
+            return out, f
+        else:
+            return out
 
     def _decode_head_forward_train(self,
                                    x,

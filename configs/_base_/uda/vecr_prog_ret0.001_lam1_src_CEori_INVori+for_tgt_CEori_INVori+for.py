@@ -1,7 +1,7 @@
-_base_ = ['prog_vecr_ret0.01_lam0.3.py']
+_base_ = ['vecr_prog_ret0.01_lam0.3.py']
 
 uda = dict(
-    type='Prog_VECR',
+    type='VECR_ProG',
     fourier_ratio=0.001,
     fourier_lambda=1.,
     invariant=dict(
