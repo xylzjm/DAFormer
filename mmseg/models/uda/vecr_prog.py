@@ -81,9 +81,15 @@ class VECR_ProG(VECR):
         loss_2 = ce_criterion(logits_2, label)
         inv_loss, inv_log = self._parse_losses({'loss_inv_feat': loss_1 + loss_2})
         inv_log.pop('loss', None)
-
         return inv_loss, inv_log
 
+    def feat_consist_loss(self, f1, f2, weight):
+        mse_criterion = nn.MSELoss()
+        loss = mse_criterion(f1, f2)
+        inv_loss, inv_log = self._parse_losses({'loss_inv_feat': weight * loss})
+        inv_log.pop('loss', None)
+        return inv_loss, inv_log
+    
     def forward_train(
         self, img, img_metas, gt_semantic_seg, target_img, target_img_metas
     ):
