@@ -52,7 +52,9 @@ class VECR_ProG(VECR):
         assert not torch.equal(f1, f2)
         assert f1.shape == f2.shape
         b, a, h, w = f1.shape
-        feat = (f1 + f2).permute(0, 2, 3, 1).contiguous().view(b * h * w, a)
+        f1 = f1.permute(0, 2, 3, 1).contiguous().view(b * h * w, a)
+        f2 = f2.permute(0, 2, 3, 1).contiguous().view(b * h * w, a)
+        # feat = (f1 + f2).permute(0, 2, 3, 1).contiguous().view(b * h * w, a)
         label = (
             resize(label.float(), size=(h, w), mode='nearest')
             .long()
@@ -62,16 +64,22 @@ class VECR_ProG(VECR):
 
         mask = (label != self.ignore_index)
         label = label[mask]
-        feat = feat[mask]
+        f1 = f1[mask]
+        f2 = f2[mask]
+        # feat = feat[mask]
 
-        feat = F.normalize(feat, p=2, dim=1)
+        f1 = F.normalize(f1, p=2, dim=1)
+        f2 = F.normalize(f2, p=2, dim=1)
         proto = F.normalize(proto, p=2, dim=1)
-        logits = feat @ proto.permute(1, 0).contiguous()
-        logits = logits / 50.0
+        logits_1 = f1 @ proto.permute(1, 0).contiguous()
+        logits_1 = logits_1 / 50.0
+        logits_2 = f2 @ proto.permute(1, 0).contiguous()
+        logits_2 = logits_2 / 50.0
 
         ce_criterion = nn.CrossEntropyLoss()
-        loss = ce_criterion(logits, label)
-        inv_loss, inv_log = self._parse_losses({'loss_inv_feat': loss})
+        loss_1 = ce_criterion(logits_1, label)
+        loss_2 = ce_criterion(logits_2, label)
+        inv_loss, inv_log = self._parse_losses({'loss_inv_feat': loss_1 + loss_2})
         inv_log.pop('loss', None)
 
         return inv_loss, inv_log
