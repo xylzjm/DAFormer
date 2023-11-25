@@ -233,7 +233,11 @@ class VECR_ProW(VECR):
             )
             log_vars.update(add_prefix(src_invlog, 'src'))
             src_invloss.backward()
-            del src_featpool
+        # Garbage collection
+        try:
+            del src_loss, src_invloss, src_featpool
+        except NameError:
+            pass
 
         # train student with target
         tgt_invflag = self.inv_cfg['target']['consist'] is not None
@@ -256,7 +260,7 @@ class VECR_ProW(VECR):
                 log_vars.update(mix_log)
                 mix_loss.backward(retain_graph=tgt_invflag)
             elif tgt_args == ('fourier', 'fourier'):
-                mixfr_losses = self.get_model().forward_train(
+                mix_losses = self.get_model().forward_train(
                     mixed_fr_img,
                     img_metas,
                     mixed_lbl,
@@ -264,12 +268,12 @@ class VECR_ProW(VECR):
                     return_decfeat=tgt_invflag,
                 )
                 if tgt_invflag and tgt_args in self.inv_cfg['target']['consist']:
-                    tgt_featpool[tgt_args] = mixfr_losses.pop('dec_feat')
-                assert 'dec_feat' not in mixfr_losses
-                mixfr_losses = add_prefix(mixfr_losses, 'mix_for')
-                mixfr_loss, mixfr_log = self._parse_losses(mixfr_losses)
-                log_vars.update(mixfr_log)
-                mixfr_loss.backward(retain_graph=tgt_invflag)
+                    tgt_featpool[tgt_args] = mix_losses.pop('dec_feat')
+                assert 'dec_feat' not in mix_losses
+                mix_losses = add_prefix(mix_losses, 'mix_for')
+                mix_loss, mix_log = self._parse_losses(mix_losses)
+                log_vars.update(mix_log)
+                mix_loss.backward(retain_graph=tgt_invflag)
             else:
                 raise ValueError(f'{tgt_args} not allowed in target CE arguments')
         # target domain feature invariance loss
@@ -299,7 +303,11 @@ class VECR_ProW(VECR):
             )
             log_vars.update(add_prefix(tgt_invlog, 'tgt'))
             tgt_invloss.backward()
-            del tgt_featpool
+        # Garbage collection
+        try:
+            del mix_loss, tgt_invloss, tgt_featpool
+        except NameError:
+            pass
 
         if self.local_iter % self.debug_img_interval == 0:
             out_dir = os.path.join(self.train_cfg['work_dir'], 'class_mix_debug')

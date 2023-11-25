@@ -535,8 +535,8 @@ def generate_experiment_cfgs(id):
         ]
         architecture, backbone = ('daformer_sepaspp_logit_constraint', 'mitb5')
         udas = [
-            # 'prog_vecr_ret0.001_lam1_src_CEori+for_tgt_CEori+for',
-            'prog_vecr_ret0.001_lam1_src_CEori_INVori+for_tgt_CEori_INVori+for',
+            # 'vecr_prog_ret0.001_lam1_src_CEori+for_tgt_CEori+for',
+            'vecr_prog_ret0.001_lam1_src_CEori_INVori+for_tgt_CEori_INVori+for',
         ]
         crop = '640x640'
         rcs_T = 0.01
