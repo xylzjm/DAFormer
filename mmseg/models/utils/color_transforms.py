@@ -89,7 +89,7 @@ def night_fog_filter(normed_img, means, stds, night_map, mode='hsv-s-w4'):
     return normed_img
 
 
-def fourier_transform(data, mean, std, ratio=0.01, lam=0.7):
+def fourier_transform(data, mean, std, ratio=0.01, lam=0.3):
     denorm_(data, mean, std)
     data = amplitude_mixup(data[0], data[1], ratio, lam)
     renorm_(data, mean, std)
