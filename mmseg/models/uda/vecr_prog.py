@@ -106,11 +106,11 @@ class VECR_ProG(VECR):
         if self.local_iter == 0:
             self._init_ema_weights()
             # assert _params_equal(self.get_ema_model(), self.get_model())
-            self.proto_estimator = (
+            """ self.proto_estimator = (
                 PrototypeEstimator(self.proto_cfg, resume=self.proto_resume)
                 if self.src_invflag or self.tgt_invflag
                 else None
-            )
+            ) """
         if self.local_iter > 0:
             self._update_ema(self.local_iter)
             # assert not _params_equal(self.get_ema_model(), self.get_model())
@@ -204,7 +204,7 @@ class VECR_ProG(VECR):
         )
 
         # update feature statistics
-        if self.src_invflag or self.tgt_invflag:
+        """ if self.src_invflag or self.tgt_invflag:
             with torch.no_grad():
                 src_emafeat = self.get_ema_model().extract_decfeat(img)
                 tgt_emafeat = self.get_ema_model().extract_decfeat(target_img)
@@ -231,7 +231,7 @@ class VECR_ProG(VECR):
                 )
                 self.proto_estimator.update(feat=src_emafeat, label=src_mask)
                 self.proto_estimator.update(feat=tgt_emafeat, label=tgt_mask)
-                del src_emafeat, tgt_emafeat
+                del src_emafeat, tgt_emafeat """
 
         # train student with source
         src_featpool = {}
@@ -281,11 +281,10 @@ class VECR_ProG(VECR):
                         src_fr_img
                     )
             assert len(src_featpool) == len(self.inv_cfg['source']['consist'])
-            src_invloss, src_invlog = self.feat_invariance_loss(
+            src_invloss, src_invlog = self.feat_consist_loss(
                 src_featpool[self.inv_cfg['source']['consist'][0]],
                 src_featpool[self.inv_cfg['source']['consist'][1]],
-                proto=self.proto_estimator.Proto.detach(),
-                label=gt_semantic_seg,
+                weight=50.0
             )
             log_vars.update(add_prefix(src_invlog, 'src'))
             src_invloss.backward()
@@ -356,11 +355,10 @@ class VECR_ProG(VECR):
                         mixed_fr_img
                     )
             assert len(tgt_featpool) == len(self.inv_cfg['target']['consist'])
-            tgt_invloss, tgt_invlog = self.feat_invariance_loss(
+            tgt_invloss, tgt_invlog = self.feat_consist_loss(
                 tgt_featpool[self.inv_cfg['target']['consist'][0]],
                 tgt_featpool[self.inv_cfg['target']['consist'][1]],
-                proto=self.proto_estimator.Proto.detach(),
-                label=tgt_semantic_seg,
+                weight=20.0
             )
             log_vars.update(add_prefix(tgt_invlog, 'tgt'))
             tgt_invloss.backward()

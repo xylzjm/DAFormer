@@ -225,11 +225,10 @@ class VECR_ProW(VECR_ProG):
                         src_fr_img
                     )
             assert len(src_featpool) == len(self.inv_cfg['source']['consist'])
-            src_invloss, src_invlog = self.feat_invariance_loss(
+            src_invloss, src_invlog = self.feat_consist_loss(
                 src_featpool[self.inv_cfg['source']['consist'][0]],
                 src_featpool[self.inv_cfg['source']['consist'][1]],
-                proto=self.proto_estimator.Proto.detach(),
-                label=gt_semantic_seg,
+                weight=50.0,
             )
             log_vars.update(add_prefix(src_invlog, 'src'))
             src_invloss.backward()
@@ -295,11 +294,10 @@ class VECR_ProW(VECR_ProG):
                         mixed_fr_img
                     )
             assert len(tgt_featpool) == len(self.inv_cfg['target']['consist'])
-            tgt_invloss, tgt_invlog = self.feat_invariance_loss(
+            tgt_invloss, tgt_invlog = self.feat_consist_loss(
                 tgt_featpool[self.inv_cfg['target']['consist'][0]],
                 tgt_featpool[self.inv_cfg['target']['consist'][1]],
-                proto=self.proto_estimator.Proto.detach(),
-                label=tgt_semantic_seg,
+                weight=20.0
             )
             log_vars.update(add_prefix(tgt_invlog, 'tgt'))
             tgt_invloss.backward()
