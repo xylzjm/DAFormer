@@ -6,5 +6,6 @@
 from mmseg.models.uda.dacs import DACS
 from mmseg.models.uda.vecr import VECR
 from mmseg.models.uda.vecr_prog import VECR_ProG
+from mmseg.models.uda.vecr_prow import VECR_ProW
 
-__all__ = ['DACS', 'VECR', 'VECR_ProG']
+__all__ = ['DACS', 'VECR', 'VECR_ProG', 'VECR_ProW']
