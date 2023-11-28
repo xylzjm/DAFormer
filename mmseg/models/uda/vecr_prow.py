@@ -7,7 +7,7 @@ import torch
 import torch.nn.functional as F
 from mmseg.core import add_prefix
 from mmseg.models import UDA
-from mmseg.models.uda.vecr import VECR
+from mmseg.models.uda.vecr_prog import VECR_ProG
 from mmseg.models.utils.color_transforms import fourier_transform, night_fog_filter
 from mmseg.models.utils.dacs_transforms import (
     denorm,
@@ -23,7 +23,7 @@ from torch.nn.modules.dropout import _DropoutNd
 
 
 @UDA.register_module()
-class VECR_ProW(VECR):
+class VECR_ProW(VECR_ProG):
     def __init__(self, **cfg) -> None:
         super(VECR_ProW, self).__init__(**cfg)
 
@@ -37,7 +37,7 @@ class VECR_ProW(VECR):
         proto = F.normalize(proto, p=2, dim=1)
 
         w = feat @ proto.permute(1, 0).contiguous()
-        w = w.softmax(dim=1).view(b, h, w, c).permute(0, 3, 1, 2)
+        w = ((w + 1) / 2).view(b, h, w, c).permute(0, 3, 1, 2)
 
         w = w.gather(dim=1, index=label.unsqueeze(1))
         return w

@@ -42,6 +42,11 @@ class VECR_ProG(VECR):
         self.inv_cfg = cfg['invariant']
         assert isinstance(self.inv_cfg['source']['ce'], (list, tuple))
         assert isinstance(self.inv_cfg['target']['ce'], (list, tuple))
+        self.src_invflag = self.inv_cfg['source']['consist'] is not None
+        self.tgt_invflag = self.inv_cfg['target']['consist'] is not None
+        mmcv.print_log(
+            f'src_invflag={self.src_invflag}, tgt_invflag={self.tgt_invflag}', 'mmcv'
+        )
         self.src_invlam = self.inv_cfg['inv_loss']['src_weight']
         self.tgt_invlam = self.inv_cfg['inv_loss']['tgt_weight']
         mmcv.print_log(
@@ -89,7 +94,7 @@ class VECR_ProG(VECR):
         inv_loss, inv_log = self._parse_losses({'loss_inv_feat': weight * loss})
         inv_log.pop('loss', None)
         return inv_loss, inv_log
-    
+
     def forward_train(
         self, img, img_metas, gt_semantic_seg, target_img, target_img_metas
     ):
@@ -101,8 +106,10 @@ class VECR_ProG(VECR):
         if self.local_iter == 0:
             self._init_ema_weights()
             # assert _params_equal(self.get_ema_model(), self.get_model())
-            self.proto_estimator = PrototypeEstimator(
-                self.proto_cfg, resume=self.proto_resume
+            self.proto_estimator = (
+                PrototypeEstimator(self.proto_cfg, resume=self.proto_resume)
+                if self.src_invflag or self.tgt_invflag
+                else None
             )
         if self.local_iter > 0:
             self._update_ema(self.local_iter)
@@ -197,68 +204,74 @@ class VECR_ProG(VECR):
         )
 
         # update feature statistics
-        with torch.no_grad():
-            src_emafeat = self.get_ema_model().extract_decfeat(img)
-            tgt_emafeat = self.get_ema_model().extract_decfeat(target_img)
+        if self.src_invflag or self.tgt_invflag:
+            with torch.no_grad():
+                src_emafeat = self.get_ema_model().extract_decfeat(img)
+                tgt_emafeat = self.get_ema_model().extract_decfeat(target_img)
 
-            assert src_emafeat.shape == tgt_emafeat.shape
-            b, a, h, w = src_emafeat.shape
-            src_emafeat = (
-                src_emafeat.permute(0, 2, 3, 1).contiguous().view(b * h * w, a)
-            )
-            tgt_emafeat = (
-                tgt_emafeat.permute(0, 2, 3, 1).contiguous().view(b * h * w, a)
-            )
-            src_mask = (
-                resize(gt_semantic_seg.float(), size=(h, w), mode='nearest')
-                .long()
-                .contiguous()
-                .view(b * h * w, )
-            )
-            tgt_mask = (
-                resize(tgt_semantic_seg.float(), size=(h, w), mode='nearest')
-                .long()
-                .contiguous()
-                .view(b * h * w, )
-            )
-            self.proto_estimator.update(feat=src_emafeat, label=src_mask)
-            self.proto_estimator.update(feat=tgt_emafeat, label=tgt_mask)
-            del src_emafeat, tgt_emafeat
+                assert src_emafeat.shape == tgt_emafeat.shape
+                b, a, h, w = src_emafeat.shape
+                src_emafeat = (
+                    src_emafeat.permute(0, 2, 3, 1).contiguous().view(b * h * w, a)
+                )
+                tgt_emafeat = (
+                    tgt_emafeat.permute(0, 2, 3, 1).contiguous().view(b * h * w, a)
+                )
+                src_mask = (
+                    resize(gt_semantic_seg.float(), size=(h, w), mode='nearest')
+                    .long()
+                    .contiguous()
+                    .view(b * h * w, )
+                )
+                tgt_mask = (
+                    resize(tgt_semantic_seg.float(), size=(h, w), mode='nearest')
+                    .long()
+                    .contiguous()
+                    .view(b * h * w, )
+                )
+                self.proto_estimator.update(feat=src_emafeat, label=src_mask)
+                self.proto_estimator.update(feat=tgt_emafeat, label=tgt_mask)
+                del src_emafeat, tgt_emafeat
 
         # train student with source
-        src_invflag = self.inv_cfg['source']['consist'] is not None
         src_featpool = {}
         for src_args in self.inv_cfg['source']['ce']:
             assert isinstance(src_args, str)
             if src_args == 'original':
                 src_losses = self.get_model().forward_train(
-                    img, img_metas, gt_semantic_seg, return_decfeat=src_invflag
+                    img, img_metas, gt_semantic_seg, return_decfeat=self.src_invflag
                 )
-                if src_invflag and src_args in self.inv_cfg['source']['consist']:
+                if (
+                    self.src_invflag
+                    and src_args in self.inv_cfg['source']['consist']
+                ):
                     src_featpool[src_args] = src_losses.pop('dec_feat')
                 assert 'dec_feat' not in src_losses
                 src_losses = add_prefix(src_losses, 'src_ori')
                 src_loss, src_log = self._parse_losses(src_losses)
                 log_vars.update(src_log)
-                src_loss.backward(retain_graph=src_invflag)
+                src_loss.backward(retain_graph=self.src_invflag)
             elif src_args == 'fourier':
                 src_losses = self.get_model().forward_train(
                     src_fr_img,
                     img_metas,
                     gt_semantic_seg,
-                    return_decfeat=src_invflag,
+                    return_decfeat=self.src_invflag,
                 )
-                if src_invflag and src_args in self.inv_cfg['source']['consist']:
+                if (
+                    self.src_invflag
+                    and src_args in self.inv_cfg['source']['consist']
+                ):
                     src_featpool[src_args] = src_losses.pop('dec_feat')
                 assert 'dec_feat' not in src_losses
                 src_losses = add_prefix(src_losses, 'src_for')
                 src_loss, src_log = self._parse_losses(src_losses)
                 log_vars.update(src_log)
-                src_loss.backward(retain_graph=src_invflag)
+                src_loss.backward(retain_graph=self.src_invflag)
             else:
                 raise ValueError(f'{src_args} not allowed in source CE arguments')
         # source domain feature invariance loss
-        if src_invflag:
+        if self.src_invflag:
             for inv_args in self.inv_cfg['source']['consist']:
                 assert isinstance(inv_args, str)
                 if inv_args == 'original' and inv_args not in src_featpool:
@@ -283,7 +296,6 @@ class VECR_ProG(VECR):
             pass
 
         # train student with target
-        tgt_invflag = self.inv_cfg['target']['consist'] is not None
         tgt_featpool = {}
         for tgt_args in self.inv_cfg['target']['ce']:
             assert isinstance(tgt_args, (list, tuple))
@@ -293,34 +305,40 @@ class VECR_ProG(VECR):
                     img_metas,
                     mixed_lbl,
                     pseudo_weight,
-                    return_decfeat=tgt_invflag,
+                    return_decfeat=self.tgt_invflag,
                 )
-                if tgt_invflag and tgt_args in self.inv_cfg['target']['consist']:
+                if (
+                    self.tgt_invflag
+                    and tgt_args in self.inv_cfg['target']['consist']
+                ):
                     tgt_featpool[tgt_args] = mix_losses.pop('dec_feat')
                 assert 'dec_feat' not in mix_losses
                 mix_losses = add_prefix(mix_losses, 'mix_ori')
                 mix_loss, mix_log = self._parse_losses(mix_losses)
                 log_vars.update(mix_log)
-                mix_loss.backward(retain_graph=tgt_invflag)
+                mix_loss.backward(retain_graph=self.tgt_invflag)
             elif tgt_args == ('fourier', 'fourier'):
                 mix_losses = self.get_model().forward_train(
                     mixed_fr_img,
                     img_metas,
                     mixed_lbl,
                     pseudo_weight,
-                    return_decfeat=tgt_invflag,
+                    return_decfeat=self.tgt_invflag,
                 )
-                if tgt_invflag and tgt_args in self.inv_cfg['target']['consist']:
+                if (
+                    self.tgt_invflag
+                    and tgt_args in self.inv_cfg['target']['consist']
+                ):
                     tgt_featpool[tgt_args] = mix_losses.pop('dec_feat')
                 assert 'dec_feat' not in mix_losses
                 mix_losses = add_prefix(mix_losses, 'mix_for')
                 mix_loss, mix_log = self._parse_losses(mix_losses)
                 log_vars.update(mix_log)
-                mix_loss.backward(retain_graph=tgt_invflag)
+                mix_loss.backward(retain_graph=self.tgt_invflag)
             else:
                 raise ValueError(f'{tgt_args} not allowed in target CE arguments')
         # target domain feature invariance loss
-        if tgt_invflag:
+        if self.tgt_invflag:
             for inv_args in self.inv_cfg['target']['consist']:
                 assert isinstance(inv_args, (list, tuple))
                 if (
