@@ -105,6 +105,6 @@ if __name__ == '__main__':
             print('Run job {}'.format(cfg['name']))
             train.main([config_files[i]])
             torch.cuda.empty_cache()
-        os.system('/root/upload.sh')
+        os.system(f'/root/upload.sh {exp_name}')
     else:
         raise NotImplementedError(args.machine)
