@@ -7,7 +7,6 @@ import mmcv
 import numpy as np
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 from mmseg.core import add_prefix
 from mmseg.models import UDA
 from mmseg.models.uda.vecr import VECR
@@ -18,9 +17,7 @@ from mmseg.models.utils.dacs_transforms import (
     get_mean_std,
     strong_transform,
 )
-from mmseg.models.utils.prototype_estimator import PrototypeEstimator
 from mmseg.models.utils.visualization import subplotimg
-from mmseg.ops import resize
 from timm.models.layers import DropPath
 from torch.nn.modules.dropout import _DropoutNd
 
@@ -52,41 +49,6 @@ class VECR_ProG(VECR):
         mmcv.print_log(
             f'src_invlam: {self.src_invlam}, tgt_invlam: {self.tgt_invlam}', 'mmcv'
         )
-
-    def feat_invariance_loss(self, f1, f2, proto, label):
-        assert not torch.equal(f1, f2)
-        assert f1.shape == f2.shape
-        b, a, h, w = f1.shape
-        f1 = f1.permute(0, 2, 3, 1).contiguous().view(b * h * w, a)
-        f2 = f2.permute(0, 2, 3, 1).contiguous().view(b * h * w, a)
-        # feat = (f1 + f2).permute(0, 2, 3, 1).contiguous().view(b * h * w, a)
-        label = (
-            resize(label.float(), size=(h, w), mode='nearest')
-            .long()
-            .contiguous()
-            .view(b * h * w, )
-        )
-
-        mask = (label != self.ignore_index)
-        label = label[mask]
-        f1 = f1[mask]
-        f2 = f2[mask]
-        # feat = feat[mask]
-
-        f1 = F.normalize(f1, p=2, dim=1)
-        f2 = F.normalize(f2, p=2, dim=1)
-        proto = F.normalize(proto, p=2, dim=1)
-        logits_1 = f1 @ proto.permute(1, 0).contiguous()
-        logits_1 = logits_1 / 50.0
-        logits_2 = f2 @ proto.permute(1, 0).contiguous()
-        logits_2 = logits_2 / 50.0
-
-        ce_criterion = nn.CrossEntropyLoss()
-        loss_1 = ce_criterion(logits_1, label)
-        loss_2 = ce_criterion(logits_2, label)
-        inv_loss, inv_log = self._parse_losses({'loss_inv_feat': loss_1 + loss_2})
-        inv_log.pop('loss', None)
-        return inv_loss, inv_log
 
     def feat_consist_loss(self, f1, f2, weight):
         mse_criterion = nn.MSELoss()
@@ -284,7 +246,7 @@ class VECR_ProG(VECR):
             src_invloss, src_invlog = self.feat_consist_loss(
                 src_featpool[self.inv_cfg['source']['consist'][0]],
                 src_featpool[self.inv_cfg['source']['consist'][1]],
-                weight=50.0
+                weight=50.0,
             )
             log_vars.update(add_prefix(src_invlog, 'src'))
             src_invloss.backward()
@@ -358,7 +320,7 @@ class VECR_ProG(VECR):
             tgt_invloss, tgt_invlog = self.feat_consist_loss(
                 tgt_featpool[self.inv_cfg['target']['consist'][0]],
                 tgt_featpool[self.inv_cfg['target']['consist'][1]],
-                weight=20.0
+                weight=20.0,
             )
             log_vars.update(add_prefix(tgt_invlog, 'tgt'))
             tgt_invloss.backward()
