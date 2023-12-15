@@ -10,6 +10,7 @@ from .isa_head import ISAHead
 from .psp_head import PSPHead
 from .segformer_head import SegFormerHead
 from .sep_aspp_head import DepthwiseSeparableASPPHead
+from .taskformer_head import TaskFormerHead
 from .uper_head import UPerHead
 
 __all__ = [
@@ -23,4 +24,5 @@ __all__ = [
     'SegFormerHead',
     'DAFormerHead',
     'ISAHead',
+    'TaskFormerHead',
 ]

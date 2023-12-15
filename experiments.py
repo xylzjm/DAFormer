@@ -21,6 +21,8 @@ def get_model_base(architecture, backbone):
         }[backbone]
     if 'daformer_' in architecture and 'mitb5' in backbone:
         return f'_base_/models/{architecture}_mitb5.py'
+    if 'taskformer_' in architecture and 'mitb5' in backbone:
+        return f'_base_/models/{architecture}_mitb5.py'
     if 'upernet' in architecture and 'mit' in backbone:
         return f'_base_/models/{architecture}_mit.py'
     assert 'mit' not in backbone or '-del' in backbone
@@ -182,9 +184,9 @@ def generate_experiment_cfgs(id):
         # Setup runner
         cfg['runner'] = dict(type='IterBasedRunner', max_iters=iters)
         cfg['checkpoint_config'] = dict(
-            by_epoch=False, interval=iters, max_keep_ckpts=1
+            by_epoch=False, interval=iters // 10, max_keep_ckpts=11
         )
-        cfg['evaluation'] = dict(interval=iters // 40, metric='mIoU')
+        cfg['evaluation'] = dict(interval=iters // 10, metric='mIoU')
 
         # Construct config name
         uda_mod = uda
