@@ -184,7 +184,7 @@ def generate_experiment_cfgs(id):
         # Setup runner
         cfg['runner'] = dict(type='IterBasedRunner', max_iters=iters)
         cfg['checkpoint_config'] = dict(
-            by_epoch=False, interval=iters // 10, max_keep_ckpts=11
+            by_epoch=False, interval=iters // 10, max_keep_ckpts=5
         )
         cfg['evaluation'] = dict(interval=iters // 10, metric='mIoU')
 
