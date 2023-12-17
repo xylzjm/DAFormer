@@ -79,7 +79,7 @@ class VECR_ProW(VECR_ProG):
 
         # color style transfer
         night_map = [
-            re.search('night | twilight', meta['filename']) is not None
+            'night' in meta['filename'] or 'twilight' in meta['filename']
             for meta in target_img_metas
         ]
         tgt_ib_img = night_fog_filter(

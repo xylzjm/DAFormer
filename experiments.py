@@ -497,7 +497,7 @@ def generate_experiment_cfgs(id):
         datasets = [
             ('cityscapes', 'acdc'),
         ]
-        architecture, backbone = ('taskformer_sepaspp', 'mitb5')
+        architecture, backbone = ('taskformer_sepaspp_logit_constraint_mitb5', 'mitb5')
         uda = 'vecr_ret0.01_lam0.3'
         crop = '640x640'
         rcs_T = 0.01
