@@ -1,9 +1,9 @@
 import argparse
-
 import mmcv
 import torch
 from mmcv.parallel import MMDataParallel, scatter
 from mmcv.runner import load_checkpoint
+
 from mmseg.apis import set_random_seed
 from mmseg.datasets import build_dataloader, build_dataset
 from mmseg.models.builder import build_segmentor
@@ -24,13 +24,12 @@ def proto_init(model, data_loader, device, cfg):
             data = scatter(data, device)[0]
             src_img, src_label = data['img'], data['gt_semantic_seg']
 
-            src_feat = model.module.extract_decfeat(src_img)
-            B, N, Hs, Ws = src_feat.shape
+            src_feat = model.module.encode_decode(src_img, None)
+            B, A, Hs, Ws = src_feat.shape
 
             # source mask: downsample the ground-truth label
             src_mask = (
-                resize(src_label.float(), size=(Hs, Ws), mode='nearest')
-                .squeeze(0)
+                src_label.squeeze(0)
                 .long()
                 .contiguous()
                 .view(
@@ -38,7 +37,7 @@ def proto_init(model, data_loader, device, cfg):
                 )
             )
 
-            src_feat = src_feat.permute(0, 2, 3, 1).contiguous().view(B * Hs * Ws, N)
+            src_feat = src_feat.permute(0, 2, 3, 1).contiguous().view(B * Hs * Ws, A)
             feat_estimator.update(feat=src_feat.detach().clone(), label=src_mask)
 
             for _ in range(B):

@@ -7,7 +7,7 @@ import torch
 class PrototypeEstimator:
     def __init__(self, cfg, resume=None) -> None:
         self.num_class = cfg['num_class']
-        self.feat_dim = cfg['feat_dim']
+        self.feat_dim = cfg['num_class']
         self.ignore_idx = cfg['ignore_index']
         self.momentum = cfg['momentum']
         self.enable_momentum = self.momentum > 0

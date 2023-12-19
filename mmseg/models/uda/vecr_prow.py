@@ -18,7 +18,6 @@ from mmseg.models.utils.dacs_transforms import (
 )
 from mmseg.models.utils.prototype_estimator import PrototypeEstimator
 from mmseg.models.utils.visualization import subplotimg
-from mmseg.ops import resize
 
 
 @UDA.register_module()
