@@ -1,12 +1,14 @@
-import os
-import random
-import re
-
 import matplotlib.pyplot as plt
 import mmcv
 import numpy as np
+import os
+import random
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
+from timm.models.layers import DropPath
+from torch.nn.modules.dropout import _DropoutNd
+
 from mmseg.core import add_prefix
 from mmseg.models import UDA
 from mmseg.models.uda.vecr import VECR
@@ -18,8 +20,6 @@ from mmseg.models.utils.dacs_transforms import (
     strong_transform,
 )
 from mmseg.models.utils.visualization import subplotimg
-from timm.models.layers import DropPath
-from torch.nn.modules.dropout import _DropoutNd
 
 
 @UDA.register_module()
@@ -50,12 +50,25 @@ class VECR_ProG(VECR):
             f'src_invlam: {self.src_invlam}, tgt_invlam: {self.tgt_invlam}', 'mmcv'
         )
 
-    def feat_consist_loss(self, f1, f2, weight):
-        mse_criterion = nn.MSELoss()
-        loss = mse_criterion(f1, f2)
-        inv_loss, inv_log = self._parse_losses({'loss_inv_feat': weight * loss})
-        inv_log.pop('loss', None)
-        return inv_loss, inv_log
+    def feat_consist_loss(self, f1, f2, weight, mode='joker'):
+        if mode == 'joker':
+            mse_criterion = nn.MSELoss()
+            loss = mse_criterion(f2, f1)
+            inv_loss, inv_log = self._parse_losses({'loss_inv_feat': weight * loss})
+            inv_log.pop('loss', None)
+            return inv_loss, inv_log
+        else:
+            kl_criterion = nn.KLDivLoss()
+            b, a, h, w = f1.shape
+            f1 = f1.permute(0, 2, 3, 1).contiguous().view(b * h * w, a)
+            f1 = F.normalize(f1, p=2, dim=1)
+            f2 = f2.permute(0, 2, 3, 1).contiguous().view(b * h * w, a)
+            f2 = F.normalize(f2, p=2, dim=1)
+            proto = F.normalize(proto, p=2, dim=1)
+            loss = kl_criterion(f2.log_softmax(1), f1.softmax(1))
+            inv_loss, inv_log = self._parse_losses({'loss_inv_feat': weight * loss})
+            inv_log.pop('loss', None)
+            return inv_loss, inv_log
 
     def forward_train(
         self, img, img_metas, gt_semantic_seg, target_img, target_img_metas
