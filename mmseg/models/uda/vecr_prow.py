@@ -9,15 +9,13 @@ from torch.nn.modules.dropout import _DropoutNd
 from mmseg.core import add_prefix
 from mmseg.models import UDA
 from mmseg.models.uda.vecr_prog import VECR_ProG
-from mmseg.models.utils.color_transforms import fourier_transform, night_fog_filter
-from mmseg.models.utils.dacs_transforms import (
-    denorm,
-    get_class_masks,
-    get_mean_std,
-    strong_transform,
-)
+from mmseg.models.utils.color_transforms import (fourier_transform,
+                                                 night_fog_filter)
+from mmseg.models.utils.dacs_transforms import (denorm, get_class_masks,
+                                                get_mean_std, strong_transform)
 from mmseg.models.utils.prototype_estimator import PrototypeEstimator
 from mmseg.models.utils.visualization import subplotimg
+from mmseg.ops import resize
 
 
 @UDA.register_module()
@@ -26,19 +24,19 @@ class VECR_ProW(VECR_ProG):
         super(VECR_ProW, self).__init__(**cfg)
 
     def get_pseudo_weight(self, proto, feat, label):
-        b, a, h, w = feat.shape
-        c, _ = proto.shape
-        assert label.shape == (b, h, w)
+        B, A, H, W = feat.shape
+        C, _ = proto.shape
+        assert label.shape == (B, H, W)
 
-        feat = feat.permute(0, 2, 3, 1).contiguous().view(b * h * w, a)
+        feat = feat.permute(0, 2, 3, 1).contiguous().view(B * H * W, A)
         feat = F.normalize(feat, p=2, dim=1)
         proto = F.normalize(proto, p=2, dim=1)
 
         w = feat @ proto.permute(1, 0).contiguous()
-        w = ((w + 1) / 2).view(b, h, w, c).permute(0, 3, 1, 2)
+        w = w.softmax(dim=1).view(B, H, W, C).permute(0, 3, 1, 2)
 
         w = w.gather(dim=1, index=label.unsqueeze(1))
-        return w
+        return w.squeeze(1)
 
     def forward_train(
         self, img, img_metas, gt_semantic_seg, target_img, target_img_metas
@@ -104,8 +102,8 @@ class VECR_ProW(VECR_ProG):
 
         # generate pseudo-label
         with torch.no_grad():
-            ema_tgt_logits = self.get_ema_model().encode_decode(
-                tgt_fr_img, target_img_metas
+            ema_tgt_logits, ema_tgtfr_feat = self.get_ema_model().encode_decode(
+                tgt_fr_img, target_img_metas, return_decfeat=True
             )
             ema_tgt_softmax = torch.softmax(ema_tgt_logits, dim=1)
             pseudo_prob, pseudo_lbl = torch.max(ema_tgt_softmax, dim=1)
@@ -116,7 +114,7 @@ class VECR_ProW(VECR_ProG):
             pseudo_weight = pseudo_weight * torch.ones(pseudo_lbl.shape, device=dev) """
             pseudo_weight = self.get_pseudo_weight(
                 proto=self.proto_estimator.Proto.detach(),
-                feat=ema_tgt_logits,
+                feat=ema_tgtfr_feat,
                 label=pseudo_lbl,
             )
             # get gt pixel-weight
@@ -129,24 +127,40 @@ class VECR_ProW(VECR_ProG):
             ] = self.ignore_index
         tgt_semantic_seg = tgt_semantic_seg.unsqueeze(1)
         with torch.no_grad():
-            ema_src_logits = self.get_ema_model().encode_decode(img, img_metas)
+            src_emafeat = self.get_ema_model().extract_decfeat(img)
+            tgt_emafeat = self.get_ema_model().extract_decfeat(target_img)
 
-            b, a, h, w = ema_src_logits.shape
-            ema_src_logits = (
-                ema_src_logits.permute(0, 2, 3, 1).contiguous().view(b * h * w, a)
+            assert src_emafeat.shape == tgt_emafeat.shape
+            b, a, h, w = src_emafeat.shape
+            src_emafeat = (
+                src_emafeat.permute(0, 2, 3, 1).contiguous().view(b * h * w, a)
             )
-            ema_tgt_logits = (
-                ema_tgt_logits.permute(0, 2, 3, 1).contiguous().view(b * h * w, a)
+            tgt_emafeat = (
+                tgt_emafeat.permute(0, 2, 3, 1).contiguous().view(b * h * w, a)
             )
-            self.proto_estimator.update(feat=ema_src_logits, label=gt_semantic_seg)
-            self.proto_estimator.update(feat=ema_tgt_logits, label=tgt_semantic_seg)
+            src_mask = (
+                resize(gt_semantic_seg.float(), size=(h, w), mode='nearest')
+                .long()
+                .contiguous()
+                .view(b * h * w, )
+            )
+            tgt_mask = (
+                resize(tgt_semantic_seg.float(), size=(h, w), mode='nearest')
+                .long()
+                .contiguous()
+                .view(b * h * w, )
+            )
+            self.proto_estimator.update(feat=src_emafeat, label=src_mask)
+            self.proto_estimator.update(feat=tgt_emafeat, label=tgt_mask)
         # Garbage Collection
         del (
             ema_tgt_logits,
+            ema_tgtfr_feat,
             ema_tgt_softmax,
             pseudo_prob,
             tgt_semantic_seg,
-            ema_src_logits,
+            src_emafeat,
+            tgt_emafeat,
         )
 
         # prepare target train data
@@ -181,11 +195,11 @@ class VECR_ProW(VECR_ProG):
             assert isinstance(src_args, str)
             if src_args == 'original':
                 src_losses = self.get_model().forward_train(
-                    img, img_metas, gt_semantic_seg, return_logits=src_invflag
+                    img, img_metas, gt_semantic_seg, return_decfeat=src_invflag
                 )
                 if src_invflag and src_args in self.inv_cfg['source']['consist']:
-                    src_featpool[src_args] = src_losses.pop('logits')
-                assert 'logits' not in src_losses
+                    src_featpool[src_args] = src_losses.pop('dec_feat')
+                assert 'dec_feat' not in src_losses
                 src_losses = add_prefix(src_losses, 'src_ori')
                 src_loss, src_log = self._parse_losses(src_losses)
                 log_vars.update(src_log)
@@ -195,11 +209,11 @@ class VECR_ProW(VECR_ProG):
                     src_fr_img,
                     img_metas,
                     gt_semantic_seg,
-                    return_logits=src_invflag,
+                    return_decfeat=src_invflag,
                 )
                 if src_invflag and src_args in self.inv_cfg['source']['consist']:
-                    src_featpool[src_args] = src_losses.pop('logits')
-                assert 'logits' not in src_losses
+                    src_featpool[src_args] = src_losses.pop('dec_feat')
+                assert 'dec_feat' not in src_losses
                 src_losses = add_prefix(src_losses, 'src_for')
                 src_loss, src_log = self._parse_losses(src_losses)
                 log_vars.update(src_log)
@@ -211,19 +225,15 @@ class VECR_ProW(VECR_ProG):
             for inv_args in self.inv_cfg['source']['consist']:
                 assert isinstance(inv_args, str)
                 if inv_args == 'original' and inv_args not in src_featpool:
-                    src_featpool[inv_args] = self.get_model().encode_decode(
-                        img, img_metas
-                    )
+                    src_featpool[inv_args] = self.get_model().extract_decfeat(img)
                 elif inv_args == 'fourier' and inv_args not in src_featpool:
-                    src_featpool[inv_args] = self.get_model().encode_decode(
-                        src_fr_img, img_metas
-                    )
+                    src_featpool[inv_args] = self.get_model().extract_decfeat(src_fr_img)
             assert len(src_featpool) == len(self.inv_cfg['source']['consist'])
             src_invloss, src_invlog = self.feat_consist_loss(
                 src_featpool[self.inv_cfg['source']['consist'][0]],
                 src_featpool[self.inv_cfg['source']['consist'][1]],
-                weight=50.0,
                 mode='batman',
+                label=gt_semantic_seg,
             )
             log_vars.update(add_prefix(src_invlog, 'src'))
             src_invloss.backward()
@@ -244,11 +254,11 @@ class VECR_ProW(VECR_ProG):
                     img_metas,
                     mixed_lbl,
                     pseudo_weight,
-                    return_logits=tgt_invflag,
+                    return_decfeat=tgt_invflag,
                 )
                 if tgt_invflag and tgt_args in self.inv_cfg['target']['consist']:
-                    tgt_featpool[tgt_args] = mix_losses.pop('logits')
-                assert 'logits' not in mix_losses
+                    tgt_featpool[tgt_args] = mix_losses.pop('dec_feat')
+                assert 'dec_feat' not in mix_losses
                 mix_losses = add_prefix(mix_losses, 'mix_ori')
                 mix_loss, mix_log = self._parse_losses(mix_losses)
                 log_vars.update(mix_log)
@@ -259,11 +269,11 @@ class VECR_ProW(VECR_ProG):
                     img_metas,
                     mixed_lbl,
                     pseudo_weight,
-                    return_logits=tgt_invflag,
+                    return_decfeat=tgt_invflag,
                 )
                 if tgt_invflag and tgt_args in self.inv_cfg['target']['consist']:
-                    tgt_featpool[tgt_args] = mix_losses.pop('logits')
-                assert 'logits' not in mix_losses
+                    tgt_featpool[tgt_args] = mix_losses.pop('dec_feat')
+                assert 'dec_feat' not in mix_losses
                 mix_losses = add_prefix(mix_losses, 'mix_for')
                 mix_loss, mix_log = self._parse_losses(mix_losses)
                 log_vars.update(mix_log)
@@ -278,22 +288,18 @@ class VECR_ProW(VECR_ProG):
                     inv_args == ('original', 'original')
                     and inv_args not in tgt_featpool
                 ):
-                    tgt_featpool[inv_args] = self.get_model().encode_decode(
-                        mixed_img, img_metas
-                    )
+                    tgt_featpool[inv_args] = self.get_model().extract_decfeat(mixed_img)
                 elif (
                     inv_args == ('fourier', 'fourier')
                     and inv_args not in tgt_featpool
                 ):
-                    tgt_featpool[inv_args] = self.get_model().encode_decode(
-                        mixed_fr_img, img_metas
-                    )
+                    tgt_featpool[inv_args] = self.get_model().extract_decfeat(mixed_fr_img)
             assert len(tgt_featpool) == len(self.inv_cfg['target']['consist'])
             tgt_invloss, tgt_invlog = self.feat_consist_loss(
                 tgt_featpool[self.inv_cfg['target']['consist'][0]],
                 tgt_featpool[self.inv_cfg['target']['consist'][1]],
-                weight=30.0,
                 mode='batman',
+                label=mixed_lbl,
             )
             log_vars.update(add_prefix(tgt_invlog, 'tgt'))
             tgt_invloss.backward()

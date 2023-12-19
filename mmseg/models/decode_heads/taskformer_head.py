@@ -215,7 +215,7 @@ class TaskFormerHead(BaseDecodeHead):
 
         self.fuse_layer = build_layer(sum(embed_dims), self.channels, **fusion_cfg)
 
-    def forward(self, inputs):
+    def fusion_bottle_feat(self, inputs):
         x = inputs
         n, _, h, w = x[-1].shape
 
@@ -252,7 +252,15 @@ class TaskFormerHead(BaseDecodeHead):
             )
         out = self.proj(torch.cat((feat, y), dim=1))
 
-        out = self.fuse_layer(out)
-        out = self.cls_seg(out)
-
-        return out
+        return self.fuse_layer(out)
+    
+    def forward(self, inputs, return_decfeat=False):
+        x = self.fusion_bottle_feat(inputs)
+        
+        if return_decfeat:
+            out = {}
+            out['feat'] = x
+            out['out'] = self.cls_seg(x)
+            return out
+        else:
+            return self.cls_seg(x)

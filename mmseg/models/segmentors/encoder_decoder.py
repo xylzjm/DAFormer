@@ -68,6 +68,12 @@ class EncoderDecoder(BaseSegmentor):
         if self.with_neck:
             x = self.neck(x)
         return x
+    
+    def extract_decfeat(self, img):
+        x = self.backbone(img)
+        if self.with_neck:
+            x = self.neck(x)
+        return self.decode_head.fusion_bottle_feat(x)
 
     def encode_decode(self, img, img_metas, return_decfeat=False):
         """Encode images with backbone and decode into a semantic segmentation
@@ -79,21 +85,35 @@ class EncoderDecoder(BaseSegmentor):
             size=img.shape[2:],
             mode='bilinear',
             align_corners=self.align_corners)
-        return out
+        if return_decfeat:
+            f = self.extract_decfeat(img)
+            f = resize(
+                input=f,
+                size=img.shape[2:],
+                mode='bilinear',
+                align_corners=self.align_corners)
+            return out, f
+        else:
+            return out
 
     def _decode_head_forward_train(self,
                                    x,
                                    img_metas,
                                    gt_semantic_seg,
-                                   seg_weight=None):
+                                   seg_weight=None,
+                                   **kwargs):
         """Run forward function and calculate loss for decode head in
         training."""
         losses = dict()
         loss_decode = self.decode_head.forward_train(x, img_metas,
                                                      gt_semantic_seg,
                                                      self.train_cfg,
-                                                     seg_weight)
+                                                     seg_weight,
+                                                     **kwargs)
 
+        dec_feat = loss_decode.pop('dec_feat', None)
+        if dec_feat is not None:
+            losses['dec_feat'] = dec_feat
         losses.update(add_prefix(loss_decode, 'decode'))
         return losses
 
@@ -136,7 +156,7 @@ class EncoderDecoder(BaseSegmentor):
                       gt_semantic_seg,
                       seg_weight=None,
                       return_feat=False,
-                      return_logits=False):
+                      **kwargs):
         """Forward function for training.
 
         Args:
@@ -157,18 +177,11 @@ class EncoderDecoder(BaseSegmentor):
         losses = dict()
         if return_feat:
             losses['features'] = x
-        if return_logits:
-            logits = self._decode_head_forward_test(x, img_metas)
-            logits = resize(
-                input=logits,
-                size=img.shape[2:],
-                mode='bilinear',
-                align_corners=self.align_corners)
-            losses['logits'] = logits
 
         loss_decode = self._decode_head_forward_train(x, img_metas,
                                                       gt_semantic_seg,
-                                                      seg_weight)
+                                                      seg_weight,
+                                                      **kwargs)
         losses.update(loss_decode)
 
         if self.with_auxiliary_head:

@@ -50,7 +50,7 @@ class VECR_ProG(VECR):
             f'src_invlam: {self.src_invlam}, tgt_invlam: {self.tgt_invlam}', 'mmcv'
         )
 
-    def feat_consist_loss(self, f1, f2, weight, mode='joker'):
+    def feat_consist_loss(self, f1, f2, label=None, weight=1., mode='joker'):
         if mode == 'joker':
             mse_criterion = nn.MSELoss()
             loss = mse_criterion(f2, f1)
@@ -58,15 +58,16 @@ class VECR_ProG(VECR):
             inv_log.pop('loss', None)
             return inv_loss, inv_log
         else:
-            kl_criterion = nn.KLDivLoss()
+            ce_criterion = nn.CrossEntropyLoss()
             b, a, h, w = f1.shape
             f1 = f1.permute(0, 2, 3, 1).contiguous().view(b * h * w, a)
             f1 = F.normalize(f1, p=2, dim=1)
             f2 = f2.permute(0, 2, 3, 1).contiguous().view(b * h * w, a)
             f2 = F.normalize(f2, p=2, dim=1)
             proto = F.normalize(proto, p=2, dim=1)
-            loss = kl_criterion(f2.log_softmax(1), f1.softmax(1))
-            inv_loss, inv_log = self._parse_losses({'loss_inv_feat': weight * loss})
+            loss1 = ce_criterion((f1 @ proto.permute(1, 0)) / 50., label)
+            loss2 = ce_criterion((f2 @ proto.permute(1, 0)) / 50., label)
+            inv_loss, inv_log = self._parse_losses({'loss_inv_feat': loss1 + loss2})
             inv_log.pop('loss', None)
             return inv_loss, inv_log
 

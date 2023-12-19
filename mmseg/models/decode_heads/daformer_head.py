@@ -160,12 +160,11 @@ class DAFormerHead(BaseDecodeHead):
 
         self.fuse_layer = build_layer(sum(embed_dims), self.channels, **fusion_cfg)
 
-    def forward(self, inputs, return_decfeat=False):
+    def fusion_bottle_feat(self, inputs):
         x = inputs
         n, _, h, w = x[-1].shape
         # for f in x:
         #     mmcv.print_log(f'{f.shape}', 'mmseg')
-
         os_size = x[0].size()[2:]
         _c = {}
         for i in self.in_index:
@@ -187,8 +186,15 @@ class DAFormerHead(BaseDecodeHead):
                     mode='bilinear',
                     align_corners=self.align_corners,
                 )
+        return self.fuse_layer(torch.cat(list(_c.values()), dim=1))
+    
+    def forward(self, inputs, return_decfeat=False):
+        x = self.fusion_bottle_feat(inputs)
 
-        x = self.fuse_layer(torch.cat(list(_c.values()), dim=1))
-        x = self.cls_seg(x)
-
-        return x
+        if return_decfeat:
+            out = {}
+            out['feat'] = x
+            out['out'] = self.cls_seg(x)
+            return out
+        else:
+            return self.cls_seg(x)

@@ -174,7 +174,8 @@ class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
                       img_metas,
                       gt_semantic_seg,
                       train_cfg,
-                      seg_weight=None):
+                      seg_weight=None,
+                      **kwargs):
         """Forward function for training.
         Args:
             inputs (list[Tensor]): List of multi-level img features.
@@ -190,8 +191,13 @@ class BaseDecodeHead(BaseModule, metaclass=ABCMeta):
         Returns:
             dict[str, Tensor]: a dictionary of loss components
         """
-        seg_logits = self.forward(inputs)
-        losses = self.losses(seg_logits, gt_semantic_seg, seg_weight)
+        outputs = self.forward(inputs, **kwargs)
+        if isinstance(outputs, dict):
+            seg_logits = outputs['out']
+            losses = self.losses(seg_logits, gt_semantic_seg, seg_weight)
+            losses['dec_feat'] = outputs['feat']
+        else:
+            losses = self.losses(outputs, gt_semantic_seg, seg_weight)
         return losses
 
     def forward_test(self, inputs, img_metas, test_cfg):
