@@ -8,7 +8,6 @@ from mmseg.apis import set_random_seed
 from mmseg.datasets import build_dataloader, build_dataset
 from mmseg.models.builder import build_segmentor
 from mmseg.models.utils.prototype_estimator import PrototypeEstimator
-from mmseg.ops import resize
 
 
 def proto_init(model, data_loader, device, cfg):

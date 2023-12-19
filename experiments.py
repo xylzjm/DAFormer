@@ -535,11 +535,10 @@ def generate_experiment_cfgs(id):
         datasets = [
             ('cityscapes', 'acdc'),
         ]
-        architecture, backbone = ('daformer_sepaspp_logit_constraint', 'mitb5')
+        architecture, backbone = ('taskformer_sepaspp', 'mitb5')
         udas = [
-            # 'vecr_prog_ret0.01_lam0.3_src_CEori+for_tgt_CEori+for',
-            'vecr_prow_ret0.001_lam1_src_CEori_INVori+for_tgt_CEori_INVori+for',
-            'vecr_prow_ret0.001_lam1_src_CEori+for_tgt_CEori+for',
+            'vecr_prow_ret0.01_lam0.3_src_CEori+for_tgt_CEori+for',
+            'vecr_prow_ret0.01_lam0.3_src_CEori_INVori+for_tgt_CEori_INVori+for',
         ]
         crop = '640x640'
         rcs_T = 0.01
