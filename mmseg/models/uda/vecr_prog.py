@@ -20,6 +20,7 @@ from mmseg.models.utils.dacs_transforms import (
     strong_transform,
 )
 from mmseg.models.utils.visualization import subplotimg
+from mmseg.ops import resize
 
 
 @UDA.register_module()
@@ -50,26 +51,39 @@ class VECR_ProG(VECR):
             f'src_invlam: {self.src_invlam}, tgt_invlam: {self.tgt_invlam}', 'mmcv'
         )
 
-    def feat_consist_loss(self, f1, f2, label=None, weight=1., mode='joker'):
+    def feat_consist_loss(
+        self, f1, f2, proto=None, label=None, weight=1.0, mode='joker'
+    ):
         if mode == 'joker':
-            mse_criterion = nn.MSELoss()
-            loss = mse_criterion(f2, f1)
-            inv_loss, inv_log = self._parse_losses({'loss_inv_feat': weight * loss})
-            inv_log.pop('loss', None)
-            return inv_loss, inv_log
+            loss = []
+            for i in range(len(f1)):
+                loss.append(F.mse_loss(f2[i], f1[i], reduction='mean'))
+            loss = weight * sum(loss)
+            inv_loss, inv_log = self._parse_losses({'loss_inv_feat': loss})
         else:
-            ce_criterion = nn.CrossEntropyLoss()
+            assert proto is not None
             b, a, h, w = f1.shape
+
             f1 = f1.permute(0, 2, 3, 1).contiguous().view(b * h * w, a)
             f1 = F.normalize(f1, p=2, dim=1)
+
             f2 = f2.permute(0, 2, 3, 1).contiguous().view(b * h * w, a)
             f2 = F.normalize(f2, p=2, dim=1)
+
+            label = (
+                resize(label.float(), size=(h, w), mode='nearest')
+                .long()
+                .contiguous()
+                .view(b * h * w, )
+            )
             proto = F.normalize(proto, p=2, dim=1)
-            loss1 = ce_criterion((f1 @ proto.permute(1, 0)) / 50., label)
-            loss2 = ce_criterion((f2 @ proto.permute(1, 0)) / 50., label)
+
+            loss1 = F.cross_entropy((f1 @ proto.permute(1, 0)), label, ignore_index=255)
+            loss2 = F.cross_entropy((f2 @ proto.permute(1, 0)), label, ignore_index=255)
             inv_loss, inv_log = self._parse_losses({'loss_inv_feat': loss1 + loss2})
-            inv_log.pop('loss', None)
-            return inv_loss, inv_log
+            
+        inv_log.pop('loss', None)
+        return inv_loss, inv_log
 
     def forward_train(
         self, img, img_metas, gt_semantic_seg, target_img, target_img_metas

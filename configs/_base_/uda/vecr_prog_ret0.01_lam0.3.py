@@ -8,6 +8,6 @@ uda = dict(
         ignore_index=255,
         momentum=0,
     ),
-    proto_resume='pretrained/prototype_source.pth',
+    proto_resume=None,
 )
 use_ddp_wrapper = True

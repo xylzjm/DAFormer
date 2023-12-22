@@ -12,8 +12,8 @@ uda = dict(
             consist=None,
         ),
         inv_loss=dict(
-            src_weight=1.0,
-            tgt_weight=1.0
+            src_weight=50.0,
+            tgt_weight=20.0
         ),
     ),
 )

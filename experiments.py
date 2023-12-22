@@ -535,7 +535,9 @@ def generate_experiment_cfgs(id):
         datasets = [
             ('cityscapes', 'acdc'),
         ]
-        architecture, backbone = ('daformer_sepaspp', 'mitb5')
+        models = [
+            ('taskformer_sepaspp_logit_constraint', 'mitb5'),
+        ]
         udas = [
             'vecr_prow_ret0.01_lam0.3_src_CEori_INVori+for_tgt_CEori_INVori+for',
             'vecr_prow_ret0.01_lam0.3_src_CEori+for_tgt_CEori+for',
@@ -543,9 +545,13 @@ def generate_experiment_cfgs(id):
         crop = '640x640'
         rcs_T = 0.01
         plcrop = False
-        for (source, target), uda, seed in itertools.product(datasets, udas, seeds):
+        for (
+            (source, target),
+            (architecture, backbone),
+            uda,
+            seed,
+        ) in itertools.product(datasets, models, udas, seeds):
             method_name = 'vecr'
-            load_from = 'pretrained/source_warmup_daformer.pth'
             cfg = config_from_vars()
             cfgs.append(cfg)
     else:
