@@ -55,11 +55,8 @@ class VECR_ProG(VECR):
         self, f1, f2, proto=None, label=None, weight=1.0, mode='joker'
     ):
         if mode == 'joker':
-            loss = []
-            for i in range(len(f1)):
-                loss.append(F.mse_loss(f2[i], f1[i], reduction='mean'))
-            loss = weight * sum(loss)
-            inv_loss, inv_log = self._parse_losses({'loss_inv_feat': loss})
+            loss = F.mse_loss(f2[-1], f1[-1], reduction='mean')
+            inv_loss, inv_log = self._parse_losses({'loss_inv_feat': weight * loss})
         else:
             assert proto is not None
             b, a, h, w = f1.shape
